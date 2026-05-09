@@ -3,19 +3,27 @@ import { AppShell } from "@/components/AppShell";
 import { BlogWorkflow } from "@/components/BlogWorkflow";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import type { WordPressConnectionDocument } from "@/lib/types";
+import type { ShopifyConnectionDocument, WordPressConnectionDocument } from "@/lib/types";
 
 export default async function CreatePage() {
   const user = await requireUser();
   const db = await getDb();
-  const connection = await db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
-    userId: new ObjectId(user.id),
-    status: "connected",
-  });
+  const userId = new ObjectId(user.id);
+  const [wordpressConnection, shopifyConnection] = await Promise.all([
+    db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
+      userId,
+      status: "connected",
+    }),
+    db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({
+      userId,
+      status: "connected",
+    }),
+  ]);
+  const connectedProvider = wordpressConnection ? "WordPress" : shopifyConnection ? "Shopify" : "";
 
   return (
     <AppShell user={user}>
-      <BlogWorkflow hasConnection={Boolean(connection)} />
+      <BlogWorkflow hasConnection={Boolean(connectedProvider)} connectedProvider={connectedProvider} />
     </AppShell>
   );
 }

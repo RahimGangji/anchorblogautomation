@@ -4,14 +4,19 @@ import { ArrowRight, Cable, FileText, PenLine } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import type { BlogProjectDocument, WordPressConnectionDocument } from "@/lib/types";
+import type {
+  BlogProjectDocument,
+  ShopifyConnectionDocument,
+  WordPressConnectionDocument,
+} from "@/lib/types";
 
 export default async function DashboardPage() {
   const user = await requireUser();
   const db = await getDb();
   const userId = new ObjectId(user.id);
-  const [connection, projects] = await Promise.all([
+  const [wordpressConnection, shopifyConnection, projects] = await Promise.all([
     db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({ userId }),
+    db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({ userId }),
     db
       .collection<BlogProjectDocument>("blogProjects")
       .find({ userId })
@@ -19,6 +24,11 @@ export default async function DashboardPage() {
       .limit(6)
       .toArray(),
   ]);
+  const activeConnection = wordpressConnection?.status === "connected"
+    ? { provider: "WordPress", detail: wordpressConnection.siteUrl }
+    : shopifyConnection?.status === "connected"
+      ? { provider: "Shopify", detail: `${shopifyConnection.shopDomain} / ${shopifyConnection.blogTitle}` }
+      : null;
 
   return (
     <AppShell user={user}>
@@ -29,11 +39,11 @@ export default async function DashboardPage() {
               <h1 className="text-2xl font-semibold text-slate-950">Dashboard</h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 Create blog briefs, generate outlines, edit content, and send finished work to
-                WordPress drafts.
+                your connected CMS as drafts.
               </p>
-              {connection?.status !== "connected" ? (
+              {!activeConnection ? (
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  You can start a brief and outline now. WordPress is only needed when you publish a
+                  You can start a brief and outline now. A CMS is only needed when you publish a
                   draft.
                 </p>
               ) : null}
@@ -67,14 +77,14 @@ export default async function DashboardPage() {
                       </div>
                       <FileText className="shrink-0 text-slate-400" size={20} />
                     </div>
-                    {project.wordpressLink ? (
+                    {project.cmsDraftLink || project.wordpressLink ? (
                       <a
-                        href={project.wordpressLink}
+                        href={project.cmsDraftLink ?? project.wordpressLink}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:underline"
                       >
-                        View WordPress draft
+                        View {project.draftProvider === "shopify" ? "Shopify" : "WordPress"} draft
                       </a>
                     ) : null}
                   </article>
@@ -91,11 +101,11 @@ export default async function DashboardPage() {
         <aside className="space-y-4">
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <Cable className="text-emerald-700" size={22} />
-            <h2 className="mt-4 text-lg font-semibold text-slate-950">WordPress</h2>
+            <h2 className="mt-4 text-lg font-semibold text-slate-950">CMS connection</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              {connection?.status === "connected"
-                ? `Connected to ${connection.siteUrl}`
-                : "Connect WordPress to send finished posts as drafts on your site."}
+              {activeConnection
+                ? `${activeConnection.provider} connected to ${activeConnection.detail}`
+                : "Connect WordPress or Shopify to send finished posts as drafts."}
             </p>
             <Link
               href="/connect"

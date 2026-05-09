@@ -30,7 +30,13 @@ const emptyOutline: BlogOutline = {
   sections: [],
 };
 
-export function BlogWorkflow({ hasConnection }: { hasConnection: boolean }) {
+export function BlogWorkflow({
+  hasConnection,
+  connectedProvider,
+}: {
+  hasConnection: boolean;
+  connectedProvider?: string;
+}) {
   const [step, setStep] = useState<Step>("brief");
   const [keyword, setKeyword] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -181,9 +187,9 @@ export function BlogWorkflow({ hasConnection }: { hasConnection: boolean }) {
       },
       (data) => {
         setNotice(
-          data.wordpressLink
-            ? `Draft created in WordPress: ${data.wordpressLink}`
-            : `Draft created in WordPress with ID ${data.wordpressPostId}.`,
+          data.draftLink
+            ? `Draft created in ${connectedProvider || data.provider}: ${data.draftLink}`
+            : `Draft created in ${connectedProvider || data.provider} with ID ${data.draftId}.`,
         );
       },
     );
@@ -206,7 +212,7 @@ export function BlogWorkflow({ hasConnection }: { hasConnection: boolean }) {
         <StepButton active={step === "content"} icon={<FileText size={18} />} label="Content" />
         {!hasConnection ? (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-            Connect WordPress before publishing a draft.
+            Connect WordPress or Shopify before publishing a draft.
           </p>
         ) : null}
       </aside>
@@ -380,7 +386,7 @@ export function BlogWorkflow({ hasConnection }: { hasConnection: boolean }) {
             <div>
               <h1 className="text-2xl font-semibold text-slate-950">Edit content</h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Polish the article, tune metadata, then create a draft in WordPress.
+                Polish the article, tune metadata, then create a draft in your connected CMS.
               </p>
             </div>
             <label className="block">
@@ -439,7 +445,7 @@ export function BlogWorkflow({ hasConnection }: { hasConnection: boolean }) {
               className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
             >
               {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-              Draft to WordPress
+              Draft to {connectedProvider || "CMS"}
             </button>
           </div>
         ) : null}

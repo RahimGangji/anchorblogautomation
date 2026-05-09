@@ -42,13 +42,13 @@ export default async function Home() {
       <section className="mx-auto grid max-w-6xl gap-10 px-6 py-16 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
         <div>
           <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            AI assisted WordPress drafting
+            AI assisted CMS drafting
           </p>
           <h1 className="max-w-3xl text-5xl font-semibold leading-tight text-slate-950">
-            Create editable blog outlines and draft polished posts to WordPress.
+            Create editable blog outlines and draft polished posts to WordPress or Shopify.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            Connect a WordPress site, guide Groq Llama with a keyword and prompt, revise every
+            Connect WordPress or Shopify, guide Groq Llama with a keyword and prompt, revise every
             step, and send the final article as a draft when it is ready.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -63,16 +63,16 @@ export default async function Home() {
               href={user ? "/connect" : "/login"}
               className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Connect WordPress
+              Connect CMS
             </Link>
           </div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 shadow-sm">
           <div className="space-y-3">
-            <Feature icon={<Cable size={20} />} title="Connect" text="Save a WordPress site URL and Bearer token." />
+            <Feature icon={<Cable size={20} />} title="Connect" text="Use either WordPress or Shopify as the active CMS." />
             <Feature icon={<Sparkles size={20} />} title="Outline" text="Generate and refine an SEO-aware article plan." />
-            <Feature icon={<FileText size={20} />} title="Draft" text="Edit rich content and publish it as a WordPress draft." />
+            <Feature icon={<FileText size={20} />} title="Draft" text="Edit rich content and publish it as a CMS draft." />
           </div>
         </div>
       </section>

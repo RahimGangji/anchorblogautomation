@@ -24,6 +24,20 @@ export type WordPressConnectionDocument = {
   updatedAt: Date;
 };
 
+export type ShopifyConnectionDocument = {
+  _id?: ObjectId;
+  userId: ObjectId;
+  shopDomain: string;
+  accessToken: string;
+  blogId: string;
+  blogTitle: string;
+  authorName: string;
+  status: "connected" | "error";
+  lastValidatedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type OutlineSection = {
   heading: string;
   bullets: string[];
@@ -44,6 +58,9 @@ export type BlogProjectDocument = {
   metaTitle: string;
   metaDescription: string;
   status: "outline" | "content" | "drafted";
+  draftProvider?: "wordpress" | "shopify";
+  cmsDraftId?: string;
+  cmsDraftLink?: string;
   wordpressPostId?: number;
   wordpressLink?: string;
   createdAt: Date;

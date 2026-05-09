@@ -3,12 +3,14 @@
 import bcrypt from "bcryptjs";
 import { ObjectId } from "mongodb";
 import { redirect } from "next/navigation";
+import { ZodError } from "zod";
 import { getDb } from "@/lib/db";
 import { createSession, destroySession, getSession } from "@/lib/session";
 import type {
   ActionResult,
   BlogOutline,
   BlogProjectDocument,
+  ShopifyConnectionDocument,
   UserDocument,
   WordPressConnectionDocument,
 } from "@/lib/types";
@@ -16,10 +18,12 @@ import {
   createOutlineSchema,
   loginSchema,
   outlineSchema,
+  shopifyConnectionSchema,
   signupSchema,
   wordpressConnectionSchema,
 } from "@/lib/validators";
 import { createContent, createOutline, reviseContent, reviseOutline } from "@/lib/ai";
+import { createShopifyDraft, validateShopifyConnection } from "@/lib/shopify";
 import {
   createWordPressDraft,
   validateWordPressConnection,
@@ -39,6 +43,10 @@ async function requireSession() {
 }
 
 function flattenError(error: unknown) {
+  if (error instanceof ZodError) {
+    return error.issues[0]?.message ?? "Check the form fields and try again.";
+  }
+
   if (error instanceof Error) {
     const msg = error.message;
     const lower = msg.toLowerCase();
@@ -165,6 +173,9 @@ export async function saveWordPressConnectionAction(
 
     const db = await getDb();
     const now = new Date();
+    await db.collection<ShopifyConnectionDocument>("shopifyConnections").deleteMany({
+      userId: session.objectUserId,
+    });
     await db.collection<WordPressConnectionDocument>("wordpressConnections").updateOne(
       { userId: session.objectUserId },
       {
@@ -186,6 +197,77 @@ export async function saveWordPressConnectionAction(
     );
 
     return { ok: true, data: { connected: true } };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function saveShopifyConnectionAction(
+  _state: ActionResult | undefined,
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const session = await requireSession();
+    const parsed = shopifyConnectionSchema.parse({
+      shopDomain: formData.get("shopDomain"),
+      accessToken: formData.get("accessToken"),
+      blogId: formData.get("blogId"),
+      authorName: formData.get("authorName"),
+    });
+
+    const validated = await validateShopifyConnection({
+      shopDomain: parsed.shopDomain,
+      accessToken: parsed.accessToken,
+      blogId: parsed.blogId,
+    });
+
+    const db = await getDb();
+    const now = new Date();
+    await db.collection<WordPressConnectionDocument>("wordpressConnections").deleteMany({
+      userId: session.objectUserId,
+    });
+    await db.collection<ShopifyConnectionDocument>("shopifyConnections").updateOne(
+      { userId: session.objectUserId },
+      {
+        $set: {
+          shopDomain: validated.shopDomain,
+          accessToken: parsed.accessToken,
+          blogId: validated.blogId,
+          blogTitle: validated.blogTitle,
+          authorName: parsed.authorName,
+          status: "connected",
+          lastValidatedAt: now,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          userId: session.objectUserId,
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+
+    return { ok: true, data: { connected: true } };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function removeCmsConnectionAction(): Promise<ActionResult> {
+  try {
+    const session = await requireSession();
+    const db = await getDb();
+
+    await Promise.all([
+      db.collection<WordPressConnectionDocument>("wordpressConnections").deleteMany({
+        userId: session.objectUserId,
+      }),
+      db.collection<ShopifyConnectionDocument>("shopifyConnections").deleteMany({
+        userId: session.objectUserId,
+      }),
+    ]);
+
+    return { ok: true, data: { removed: true } };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
@@ -376,7 +458,7 @@ export async function publishDraftAction(input: {
   contentHtml: string;
   metaTitle: string;
   metaDescription: string;
-}): Promise<ActionResult<{ wordpressPostId: number; wordpressLink: string }>> {
+}): Promise<ActionResult<{ provider: "wordpress" | "shopify"; draftId: string; draftLink: string }>> {
   try {
     const session = await requireSession();
 
@@ -389,12 +471,16 @@ export async function publishDraftAction(input: {
     }
 
     const db = await getDb();
-    const [project, connection] = await Promise.all([
+    const [project, wordpressConnection, shopifyConnection] = await Promise.all([
       db.collection<BlogProjectDocument>("blogProjects").findOne({
         _id: new ObjectId(input.projectId),
         userId: session.objectUserId,
       }),
       db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
+        userId: session.objectUserId,
+        status: "connected",
+      }),
+      db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({
         userId: session.objectUserId,
         status: "connected",
       }),
@@ -404,11 +490,23 @@ export async function publishDraftAction(input: {
       throw new Error("Project not found.");
     }
 
-    if (!connection) {
-      throw new Error("Connect WordPress before drafting.");
+    if (wordpressConnection && shopifyConnection) {
+      throw new Error("Only one CMS can be connected at a time. Remove one connection before drafting.");
     }
 
-    const draft = await createWordPressDraft(connection, input.title, input.contentHtml);
+    if (!wordpressConnection && !shopifyConnection) {
+      throw new Error("Connect WordPress or Shopify before drafting.");
+    }
+
+    const provider = wordpressConnection ? "wordpress" : "shopify";
+    const draft = wordpressConnection
+      ? await createWordPressDraft(wordpressConnection, input.title, input.contentHtml)
+      : await createShopifyDraft(
+          shopifyConnection as ShopifyConnectionDocument,
+          input.title,
+          input.contentHtml,
+          input.metaDescription,
+        );
 
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(
       { _id: project._id, userId: session.objectUserId },
@@ -418,19 +516,30 @@ export async function publishDraftAction(input: {
           contentHtml: input.contentHtml,
           metaTitle: input.metaTitle,
           metaDescription: input.metaDescription,
+          draftProvider: provider,
+          cmsDraftId: String(draft.id),
+          cmsDraftLink: draft.link,
           status: "drafted",
-          wordpressPostId: draft.id,
-          wordpressLink: draft.link,
+          ...(wordpressConnection
+            ? {
+                wordpressPostId: Number(draft.id),
+                wordpressLink: draft.link,
+              }
+            : {}),
           updatedAt: new Date(),
         },
+        ...(wordpressConnection
+          ? {}
+          : { $unset: { wordpressPostId: "", wordpressLink: "" } }),
       },
     );
 
     return {
       ok: true,
       data: {
-        wordpressPostId: draft.id,
-        wordpressLink: draft.link,
+        provider,
+        draftId: String(draft.id),
+        draftLink: draft.link,
       },
     };
   } catch (error) {

@@ -2,31 +2,33 @@
 
 import { useActionState } from "react";
 import { Cable } from "lucide-react";
-import { saveWordPressConnectionAction } from "@/app/actions";
+import { saveShopifyConnectionAction } from "@/app/actions";
 import type { ActionResult } from "@/lib/types";
 
-type WordPressFormProps = {
-  initialSiteUrl?: string;
-  initialWpUsername?: string;
+type ShopifyFormProps = {
+  initialShopDomain?: string;
+  initialBlogId?: string;
+  initialAuthorName?: string;
 };
 
-export function WordPressForm({
-  initialSiteUrl = "",
-  initialWpUsername = "",
-}: WordPressFormProps) {
+export function ShopifyForm({
+  initialShopDomain = "",
+  initialBlogId = "",
+  initialAuthorName = "",
+}: ShopifyFormProps) {
   const [state, action, pending] = useActionState<ActionResult | undefined, FormData>(
-    saveWordPressConnectionAction,
+    saveShopifyConnectionAction,
     undefined,
   );
 
   return (
     <form action={action} className="space-y-5">
       <label className="block">
-        <span className="text-sm font-medium text-slate-700">WordPress site URL</span>
+        <span className="text-sm font-medium text-slate-700">Shopify store domain</span>
         <input
-          name="siteUrl"
-          defaultValue={initialSiteUrl}
-          placeholder="https://example.com"
+          name="shopDomain"
+          defaultValue={initialShopDomain}
+          placeholder="your-store.myshopify.com"
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
           required
           autoComplete="url"
@@ -34,37 +36,43 @@ export function WordPressForm({
       </label>
 
       <label className="block">
-        <span className="text-sm font-medium text-slate-700">WordPress username</span>
+        <span className="text-sm font-medium text-slate-700">Admin API access token</span>
         <input
-          name="wpUsername"
-          defaultValue={initialWpUsername}
-          placeholder="your-login-name"
-          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
-          required
-          autoComplete="username"
-        />
-      </label>
-
-      <label className="block">
-        <span className="text-sm font-medium text-slate-700">Application password</span>
-        <input
-          name="wpApplicationPassword"
+          name="accessToken"
           type="password"
-          placeholder="Paste the 24-character app password from WordPress"
+          placeholder="shpat_..."
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
           required
           autoComplete="new-password"
         />
-        <span className="mt-1 block text-xs leading-5 text-slate-500">
-          Use the password WordPress generates under Application Passwords (24 characters, often shown in
-          groups). Do not paste your normal WordPress admin login password here—that will always return
-          HTTP 401.
-        </span>
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-medium text-slate-700">Blog ID</span>
+        <input
+          name="blogId"
+          defaultValue={initialBlogId}
+          placeholder="gid://shopify/Blog/123456789 or numeric ID"
+          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
+          required
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-medium text-slate-700">Author name</span>
+        <input
+          name="authorName"
+          defaultValue={initialAuthorName}
+          placeholder="Rahim"
+          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
+          required
+          autoComplete="name"
+        />
       </label>
 
       {state?.ok === true ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          WordPress connected successfully. Refresh this page to see the active connection.
+          Shopify connected successfully. Refresh this page to see the active connection.
         </p>
       ) : null}
 
@@ -80,7 +88,7 @@ export function WordPressForm({
         className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
       >
         <Cable size={18} aria-hidden />
-        {pending ? "Validating..." : "Connect WordPress"}
+        {pending ? "Validating..." : "Connect Shopify"}
       </button>
     </form>
   );

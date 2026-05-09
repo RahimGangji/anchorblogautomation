@@ -23,6 +23,35 @@ export const wordpressConnectionSchema = z.object({
     ),
 });
 
+export const shopifyConnectionSchema = z.object({
+  shopDomain: z
+    .string()
+    .trim()
+    .min(3, "Enter your Shopify store domain.")
+    .transform((value) =>
+      value
+        .replace(/^https?:\/\//i, "")
+        .replace(/\/.*$/, "")
+        .trim()
+        .toLowerCase(),
+    )
+    .refine((value) => /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(value), {
+      message: "Enter a valid Shopify domain, like your-store.myshopify.com.",
+    }),
+  accessToken: z.string().trim().min(20, "Enter your Shopify Admin API access token."),
+  blogId: z
+    .string()
+    .trim()
+    .min(1, "Enter the Shopify Blog ID.")
+    .transform((value) =>
+      /^\d+$/.test(value) ? `gid://shopify/Blog/${value}` : value,
+    )
+    .refine((value) => value.startsWith("gid://shopify/Blog/"), {
+      message: "Use a Shopify Blog GID, or paste the numeric Blog ID.",
+    }),
+  authorName: z.string().trim().min(2, "Enter the article author name."),
+});
+
 export const outlineSchema = z.object({
   title: z.string().trim().min(5),
   sections: z

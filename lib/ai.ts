@@ -44,6 +44,24 @@ async function completeJson(system: string, user: string) {
   return extractJson(content);
 }
 
+function limitText(value: unknown, max: number) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed.length > max ? trimmed.slice(0, max).trimEnd() : trimmed;
+}
+
+function normalizeContentJson(json: unknown) {
+  if (!json || typeof json !== "object" || Array.isArray(json)) {
+    return json;
+  }
+
+  return {
+    ...json,
+    metaTitle: limitText((json as { metaTitle?: unknown }).metaTitle, 80),
+    metaDescription: limitText((json as { metaDescription?: unknown }).metaDescription, 180),
+  };
+}
+
 export async function createOutline(keyword: string, prompt: string) {
   const json = await completeJson(
     "You create SEO blog outlines. Return only valid JSON with title and sections. Each section has heading and bullets.",
@@ -71,16 +89,16 @@ ${instruction}`,
 
 export async function createContent(keyword: string, prompt: string, outline: BlogOutline) {
   const json = await completeJson(
-    "You write publish-ready blog articles. Return only valid JSON with title, contentHtml, metaTitle, and metaDescription. contentHtml must use semantic HTML tags such as h2, h3, p, ul, li, strong, and a where useful.",
+    "You write publish-ready blog articles. Return only valid JSON with title, contentHtml, metaTitle, and metaDescription. contentHtml must use semantic HTML tags such as h2, h3, p, ul, li, strong, and a where useful. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
     `Keyword: ${keyword}
 Prompt: ${prompt}
 Outline:
 ${JSON.stringify(outline, null, 2)}
 
-Write a polished blog post from this outline. Include a concise intro, actionable sections, and a natural conclusion. Generate SEO meta title and meta description.`,
+Write a polished blog post from this outline. Include a concise intro, actionable sections, and a natural conclusion. Generate SEO meta title and meta description within the character limits.`,
   );
 
-  return contentSchema.parse(json);
+  return contentSchema.parse(normalizeContentJson(json));
 }
 
 export async function reviseContent(params: {
@@ -92,7 +110,7 @@ export async function reviseContent(params: {
   instruction: string;
 }) {
   const json = await completeJson(
-    "You revise blog content based on user instructions. Preserve unchanged sections and return only valid JSON with title, contentHtml, metaTitle, and metaDescription.",
+    "You revise blog content based on user instructions. Preserve unchanged sections and return only valid JSON with title, contentHtml, metaTitle, and metaDescription. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
     `Keyword: ${params.keyword}
 Outline:
 ${JSON.stringify(params.outline, null, 2)}
@@ -110,5 +128,5 @@ Revision instruction:
 ${params.instruction}`,
   );
 
-  return contentSchema.parse(json);
+  return contentSchema.parse(normalizeContentJson(json));
 }
