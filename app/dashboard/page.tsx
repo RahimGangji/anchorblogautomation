@@ -72,7 +72,7 @@ export default async function DashboardPage() {
                           {project.outline.title || project.keyword}
                         </h3>
                         <p className="mt-1 text-sm text-slate-600">
-                          {project.keyword} - {project.status}
+                          Primary keyword: {project.keyword} - {project.status}
                         </p>
                       </div>
                       <FileText className="shrink-0 text-slate-400" size={20} />

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogOut, PenLine, PlugZap } from "lucide-react";
+import { ImagePlus, KeyRound, LogOut, PenLine, PlugZap } from "lucide-react";
 import type { ReactNode } from "react";
 import { logoutAction } from "@/app/actions";
 
@@ -33,6 +33,20 @@ export function AppShell({ user, children }: AppShellProps) {
             >
               <PlugZap size={17} aria-hidden />
               Connect
+            </Link>
+            <Link
+              href="/api-keys"
+              className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <KeyRound size={17} aria-hidden />
+              API Keys
+            </Link>
+            <Link
+              href="/create-image"
+              className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <ImagePlus size={17} aria-hidden />
+              Create Image
             </Link>
             <form action={logoutAction}>
               <button

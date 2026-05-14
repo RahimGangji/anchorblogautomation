@@ -8,6 +8,22 @@ export type UserDocument = {
   createdAt: Date;
 };
 
+export type AiProvider = "gpt" | "claude" | "gemini";
+
+export type AiSettingsDocument = {
+  _id?: ObjectId;
+  userId: ObjectId;
+  activeProvider: AiProvider;
+  gptApiKey?: string;
+  gptModel: string;
+  claudeApiKey?: string;
+  claudeModel: string;
+  geminiApiKey?: string;
+  geminiModel: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type WordPressConnectionDocument = {
   _id?: ObjectId;
   userId: ObjectId;
@@ -52,9 +68,12 @@ export type BlogProjectDocument = {
   _id?: ObjectId;
   userId: ObjectId;
   keyword: string;
+  secondaryKeywords?: string;
+  seoEntities?: string;
   prompt: string;
   outline: BlogOutline;
   contentHtml: string;
+  slug: string;
   metaTitle: string;
   metaDescription: string;
   status: "outline" | "content" | "drafted";

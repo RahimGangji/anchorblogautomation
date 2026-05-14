@@ -64,8 +64,22 @@ export const outlineSchema = z.object({
     .min(3),
 });
 
+export const slugSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(120)
+  .transform((value) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, ""),
+  )
+  .refine((value) => value.length >= 3, "Slug must include at least 3 letters or numbers.");
+
 export const contentSchema = z.object({
   title: z.string().trim().min(5),
+  slug: slugSchema,
   contentHtml: z.string().trim().min(100),
   metaTitle: z.string().trim().min(10).max(80),
   metaDescription: z.string().trim().min(40).max(180),
@@ -73,5 +87,17 @@ export const contentSchema = z.object({
 
 export const createOutlineSchema = z.object({
   keyword: z.string().trim().min(2, "Keyword is required."),
+  secondaryKeywords: z.string().trim().optional().default(""),
+  seoEntities: z.string().trim().optional().default(""),
   prompt: z.string().trim().min(10, "Prompt must describe the blog goal."),
+});
+
+export const aiSettingsSchema = z.object({
+  activeProvider: z.enum(["gpt", "claude", "gemini"]),
+  gptApiKey: z.string().trim().optional().default(""),
+  gptModel: z.enum(["gpt-5.4", "gpt-5.5"]),
+  claudeApiKey: z.string().trim().optional().default(""),
+  claudeModel: z.enum(["claude-sonnet-4.6", "claude-haiku-4.5", "claude-opus-4.7"]),
+  geminiApiKey: z.string().trim().optional().default(""),
+  geminiModel: z.enum(["gemini-3.0", "gemini-3.1"]),
 });

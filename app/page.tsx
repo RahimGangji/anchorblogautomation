@@ -48,8 +48,8 @@ export default async function Home() {
             Create editable blog outlines and draft polished posts to WordPress or Shopify.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            Connect WordPress or Shopify, guide Groq Llama with a keyword and prompt, revise every
-            step, and send the final article as a draft when it is ready.
+            Connect WordPress or Shopify, guide AI with primary and secondary keywords, revise
+            every step, and send the final article as a draft when it is ready.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link

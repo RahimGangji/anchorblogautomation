@@ -7,6 +7,7 @@ import { ZodError } from "zod";
 import { getDb } from "@/lib/db";
 import { createSession, destroySession, getSession } from "@/lib/session";
 import type {
+  AiSettingsDocument,
   ActionResult,
   BlogOutline,
   BlogProjectDocument,
@@ -15,14 +16,19 @@ import type {
   WordPressConnectionDocument,
 } from "@/lib/types";
 import {
+  aiSettingsSchema,
   createOutlineSchema,
   loginSchema,
   outlineSchema,
   shopifyConnectionSchema,
+  slugSchema,
   signupSchema,
   wordpressConnectionSchema,
 } from "@/lib/validators";
 import { createContent, createOutline, reviseContent, reviseOutline } from "@/lib/ai";
+import { getActiveAiSettings, getAiSettings } from "@/lib/aiSettings";
+import { generateImageWithAi } from "@/lib/imageAi";
+import type { GeneratedImage } from "@/lib/imageAi";
 import { createShopifyDraft, validateShopifyConnection } from "@/lib/shopify";
 import {
   createWordPressDraft,
@@ -273,23 +279,102 @@ export async function removeCmsConnectionAction(): Promise<ActionResult> {
   }
 }
 
+export async function saveAiSettingsAction(
+  _state: ActionResult | undefined,
+  formData: FormData,
+): Promise<ActionResult<{ saved: true }>> {
+  try {
+    const session = await requireSession();
+    const parsed = aiSettingsSchema.parse({
+      activeProvider: formData.get("activeProvider"),
+      gptApiKey: formData.get("gptApiKey"),
+      gptModel: formData.get("gptModel"),
+      claudeApiKey: formData.get("claudeApiKey"),
+      claudeModel: formData.get("claudeModel"),
+      geminiApiKey: formData.get("geminiApiKey"),
+      geminiModel: formData.get("geminiModel"),
+    });
+    const now = new Date();
+    const $set: Partial<AiSettingsDocument> = {
+      activeProvider: parsed.activeProvider,
+      gptModel: parsed.gptModel,
+      claudeModel: parsed.claudeModel,
+      geminiModel: parsed.geminiModel,
+      updatedAt: now,
+    };
+
+    if (parsed.gptApiKey) $set.gptApiKey = parsed.gptApiKey;
+    if (parsed.claudeApiKey) $set.claudeApiKey = parsed.claudeApiKey;
+    if (parsed.geminiApiKey) $set.geminiApiKey = parsed.geminiApiKey;
+
+    const db = await getDb();
+    await db.collection<AiSettingsDocument>("aiSettings").updateOne(
+      { userId: session.objectUserId },
+      {
+        $set,
+        $setOnInsert: {
+          userId: session.objectUserId,
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+
+    return { ok: true, data: { saved: true } };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function generateImageAction(
+  _state: ActionResult<GeneratedImage> | undefined,
+  formData: FormData,
+): Promise<ActionResult<GeneratedImage>> {
+  try {
+    const session = await requireSession();
+    const prompt = String(formData.get("prompt") ?? "").trim();
+
+    if (prompt.length < 10) {
+      throw new Error("Describe the image you want in at least 10 characters.");
+    }
+
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+
+    if (!settings) {
+      throw new Error("Add an API key for GPT or Gemini and select it as active before creating images.");
+    }
+
+    const image = await generateImageWithAi(settings, prompt);
+
+    return { ok: true, data: image };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
 export async function generateOutlineAction(input: {
   keyword: string;
+  secondaryKeywords?: string;
+  seoEntities?: string;
   prompt: string;
 }): Promise<ActionResult<{ projectId: string; outline: BlogOutline }>> {
   try {
     const session = await requireSession();
     const parsed = createOutlineSchema.parse(input);
-    const outline = await createOutline(parsed.keyword, parsed.prompt);
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+    const outline = await createOutline(parsed, settings);
     const now = new Date();
 
     const db = await getDb();
     const result = await db.collection<BlogProjectDocument>("blogProjects").insertOne({
       userId: session.objectUserId,
       keyword: parsed.keyword,
+      secondaryKeywords: parsed.secondaryKeywords,
+      seoEntities: parsed.seoEntities,
       prompt: parsed.prompt,
       outline,
       contentHtml: "",
+      slug: "",
       metaTitle: "",
       metaDescription: "",
       status: "outline",
@@ -315,14 +400,34 @@ export async function refineOutlineAction(input: {
       throw new Error("Invalid project.");
     }
 
+    const db = await getDb();
+    const project = await db.collection<BlogProjectDocument>("blogProjects").findOne({
+      _id: new ObjectId(input.projectId),
+      userId: session.objectUserId,
+    });
+
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+
     const outline = outlineSchema.parse(input.outline);
 
     if (input.instruction.trim().length < 5) {
       throw new Error("Tell AI what to change in the outline.");
     }
 
-    const revisedOutline = await reviseOutline(outline, input.instruction);
-    const db = await getDb();
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+    const revisedOutline = await reviseOutline(
+      {
+        keyword: project.keyword,
+        secondaryKeywords: project.secondaryKeywords,
+        seoEntities: project.seoEntities,
+        prompt: project.prompt,
+      },
+      outline,
+      input.instruction,
+      settings,
+    );
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(
       { _id: new ObjectId(input.projectId), userId: session.objectUserId },
       { $set: { outline: revisedOutline, updatedAt: new Date() } },
@@ -340,6 +445,7 @@ export async function generateContentAction(input: {
 }): Promise<
   ActionResult<{
     title: string;
+    slug: string;
     contentHtml: string;
     metaTitle: string;
     metaDescription: string;
@@ -363,7 +469,17 @@ export async function generateContentAction(input: {
     }
 
     const outline = outlineSchema.parse(input.outline);
-    const content = await createContent(project.keyword, project.prompt, outline);
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+    const content = await createContent(
+      {
+        keyword: project.keyword,
+        secondaryKeywords: project.secondaryKeywords,
+        seoEntities: project.seoEntities,
+        prompt: project.prompt,
+      },
+      outline,
+      settings,
+    );
 
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(
       { _id: project._id, userId: session.objectUserId },
@@ -371,6 +487,7 @@ export async function generateContentAction(input: {
         $set: {
           outline,
           contentHtml: content.contentHtml,
+          slug: content.slug,
           metaTitle: content.metaTitle,
           metaDescription: content.metaDescription,
           status: "content",
@@ -389,12 +506,14 @@ export async function refineContentAction(input: {
   projectId: string;
   outline: BlogOutline;
   contentHtml: string;
+  slug: string;
   metaTitle: string;
   metaDescription: string;
   instruction: string;
 }): Promise<
   ActionResult<{
     title: string;
+    slug: string;
     contentHtml: string;
     metaTitle: string;
     metaDescription: string;
@@ -422,13 +541,19 @@ export async function refineContentAction(input: {
     }
 
     const outline = outlineSchema.parse(input.outline);
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
     const content = await reviseContent({
       keyword: project.keyword,
+      secondaryKeywords: project.secondaryKeywords,
+      seoEntities: project.seoEntities,
+      prompt: project.prompt,
       outline,
       contentHtml: input.contentHtml,
+      slug: input.slug,
       metaTitle: input.metaTitle,
       metaDescription: input.metaDescription,
       instruction: input.instruction,
+      settings,
     });
 
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(
@@ -437,6 +562,7 @@ export async function refineContentAction(input: {
         $set: {
           outline,
           contentHtml: content.contentHtml,
+          slug: content.slug,
           metaTitle: content.metaTitle,
           metaDescription: content.metaDescription,
           status: "content",
@@ -456,6 +582,7 @@ export async function publishDraftAction(input: {
   title: string;
   outline: BlogOutline;
   contentHtml: string;
+  slug: string;
   metaTitle: string;
   metaDescription: string;
 }): Promise<ActionResult<{ provider: "wordpress" | "shopify"; draftId: string; draftLink: string }>> {
@@ -469,6 +596,8 @@ export async function publishDraftAction(input: {
     if (!input.title.trim() || input.contentHtml.trim().length < 100) {
       throw new Error("Add a title and complete article content before drafting.");
     }
+
+    const slug = slugSchema.parse(input.slug);
 
     const db = await getDb();
     const [project, wordpressConnection, shopifyConnection] = await Promise.all([
@@ -500,7 +629,12 @@ export async function publishDraftAction(input: {
 
     const provider = wordpressConnection ? "wordpress" : "shopify";
     const draft = wordpressConnection
-      ? await createWordPressDraft(wordpressConnection, input.title, input.contentHtml)
+      ? await createWordPressDraft(
+          wordpressConnection,
+          input.title,
+          input.contentHtml,
+          slug,
+        )
       : await createShopifyDraft(
           shopifyConnection as ShopifyConnectionDocument,
           input.title,
@@ -514,6 +648,7 @@ export async function publishDraftAction(input: {
         $set: {
           outline: outlineSchema.parse(input.outline),
           contentHtml: input.contentHtml,
+          slug,
           metaTitle: input.metaTitle,
           metaDescription: input.metaDescription,
           draftProvider: provider,

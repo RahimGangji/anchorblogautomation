@@ -147,6 +147,7 @@ export async function createWordPressDraft(
   connection: WordPressConnectionDocument,
   title: string,
   contentHtml: string,
+  slug: string,
 ) {
   const baseUrl = await resolveWordPressBaseUrl(normalizeSiteUrl(connection.siteUrl));
   const response = await fetch(postsCreateUrl(baseUrl), {
@@ -160,6 +161,7 @@ export async function createWordPressDraft(
     },
     body: JSON.stringify({
       title,
+      slug,
       content: contentHtml,
       status: "draft",
     }),
