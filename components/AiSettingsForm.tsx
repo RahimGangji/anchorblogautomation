@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { KeyRound, Save } from "lucide-react";
 import { saveAiSettingsAction } from "@/app/actions";
 import type { ActionResult, AiProvider } from "@/lib/types";
@@ -17,7 +17,56 @@ type AiSettingsFormProps = {
   };
 };
 
+const providers: Array<{
+  apiKeyName: string;
+  hasKeyField: "hasGptKey" | "hasClaudeKey" | "hasGeminiKey";
+  modelField: "gptModel" | "claudeModel" | "geminiModel";
+  modelName: string;
+  models: Array<[string, string]>;
+  provider: AiProvider;
+  title: string;
+}> = [
+  {
+    apiKeyName: "gptApiKey",
+    hasKeyField: "hasGptKey",
+    modelField: "gptModel",
+    modelName: "gptModel",
+    models: [
+      ["gpt-5.5", "GPT 5.5"],
+      ["gpt-5.4", "GPT 5.4"],
+    ],
+    provider: "gpt",
+    title: "GPT",
+  },
+  {
+    apiKeyName: "claudeApiKey",
+    hasKeyField: "hasClaudeKey",
+    modelField: "claudeModel",
+    modelName: "claudeModel",
+    models: [
+      ["claude-sonnet-4.6", "Claude Sonnet 4.6"],
+      ["claude-haiku-4.5", "Claude Haiku 4.5"],
+      ["claude-opus-4.7", "Claude Opus 4.7"],
+    ],
+    provider: "claude",
+    title: "Claude",
+  },
+  {
+    apiKeyName: "geminiApiKey",
+    hasKeyField: "hasGeminiKey",
+    modelField: "geminiModel",
+    modelName: "geminiModel",
+    models: [
+      ["gemini-3.1", "Gemini 3.1"],
+      ["gemini-3.0", "Gemini 3.0"],
+    ],
+    provider: "gemini",
+    title: "Gemini",
+  },
+];
+
 export function AiSettingsForm({ initial }: AiSettingsFormProps) {
+  const [selectedProvider, setSelectedProvider] = useState<AiProvider>(initial.activeProvider);
   const [state, action, pending] = useActionState<ActionResult | undefined, FormData>(
     saveAiSettingsAction,
     undefined,
@@ -25,45 +74,49 @@ export function AiSettingsForm({ initial }: AiSettingsFormProps) {
 
   return (
     <form action={action} className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <ProviderCard
-          apiKeyName="gptApiKey"
-          defaultModel={initial.gptModel}
-          defaultProvider={initial.activeProvider}
-          hasKey={initial.hasGptKey}
-          models={[
-            ["gpt-5.5", "GPT 5.5"],
-            ["gpt-5.4", "GPT 5.4"],
-          ]}
-          provider="gpt"
-          title="GPT"
-        />
-        <ProviderCard
-          apiKeyName="claudeApiKey"
-          defaultModel={initial.claudeModel}
-          defaultProvider={initial.activeProvider}
-          hasKey={initial.hasClaudeKey}
-          models={[
-            ["claude-sonnet-4.6", "Claude Sonnet 4.6"],
-            ["claude-haiku-4.5", "Claude Haiku 4.5"],
-            ["claude-opus-4.7", "Claude Opus 4.7"],
-          ]}
-          provider="claude"
-          title="Claude"
-        />
-        <ProviderCard
-          apiKeyName="geminiApiKey"
-          defaultModel={initial.geminiModel}
-          defaultProvider={initial.activeProvider}
-          hasKey={initial.hasGeminiKey}
-          models={[
-            ["gemini-3.1", "Gemini 3.1"],
-            ["gemini-3.0", "Gemini 3.0"],
-          ]}
-          provider="gemini"
-          title="Gemini"
-        />
+      <div className="grid gap-3 sm:grid-cols-3">
+        {providers.map((item) => (
+          <label
+            key={item.provider}
+            className={`flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition ${
+              selectedProvider === item.provider
+                ? "border-slate-950 bg-slate-950 text-white"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <input
+              type="radio"
+              name="activeProvider"
+              value={item.provider}
+              checked={selectedProvider === item.provider}
+              onChange={() => setSelectedProvider(item.provider)}
+              className="h-4 w-4 accent-slate-950"
+            />
+            <span className="text-sm font-semibold">{item.title}</span>
+          </label>
+        ))}
       </div>
+
+      {providers.map((item) =>
+        item.provider === selectedProvider ? (
+          <ProviderFields
+            key={item.provider}
+            apiKeyName={item.apiKeyName}
+            defaultModel={initial[item.modelField]}
+            hasKey={initial[item.hasKeyField]}
+            modelName={item.modelName}
+            models={item.models}
+            title={item.title}
+          />
+        ) : (
+          <input
+            key={item.provider}
+            type="hidden"
+            name={item.modelName}
+            value={initial[item.modelField]}
+          />
+        ),
+      )}
 
       {state?.ok === true ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -89,40 +142,28 @@ export function AiSettingsForm({ initial }: AiSettingsFormProps) {
   );
 }
 
-function ProviderCard({
+function ProviderFields({
   apiKeyName,
   defaultModel,
-  defaultProvider,
   hasKey,
+  modelName,
   models,
-  provider,
   title,
 }: {
   apiKeyName: string;
   defaultModel: string;
-  defaultProvider: AiProvider;
   hasKey: boolean;
+  modelName: string;
   models: Array<[string, string]>;
-  provider: AiProvider;
   title: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 p-5">
-      <label className="flex items-center gap-3">
-        <input
-          type="radio"
-          name="activeProvider"
-          value={provider}
-          defaultChecked={defaultProvider === provider}
-          className="h-4 w-4 accent-slate-950"
-        />
-        <span className="text-lg font-semibold text-slate-950">{title}</span>
-      </label>
-
+    <div className="rounded-lg border border-slate-200 bg-white p-5">
+      <h2 className="text-lg font-semibold text-slate-950">{title} settings</h2>
       <label className="mt-5 block">
         <span className="text-sm font-medium text-slate-700">Model</span>
         <select
-          name={`${provider}Model`}
+          name={modelName}
           defaultValue={defaultModel}
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
         >

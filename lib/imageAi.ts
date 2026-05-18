@@ -7,16 +7,19 @@ export type GeneratedImage = {
   model: string;
 };
 
+export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024";
+
 export async function generateImageWithAi(
   settings: ActiveAiSettings,
   prompt: string,
+  size: ImageSize = "1024x1024",
 ): Promise<GeneratedImage> {
   if (settings.provider === "gpt") {
-    return await generateOpenAiImage(settings, prompt);
+    return await generateOpenAiImage(settings, prompt, size);
   }
 
   if (settings.provider === "gemini") {
-    return await generateGeminiImage(settings, prompt);
+    return await generateGeminiImage(settings, prompt, size);
   }
 
   throw new Error(
@@ -24,7 +27,7 @@ export async function generateImageWithAi(
   );
 }
 
-async function generateOpenAiImage(settings: ActiveAiSettings, prompt: string) {
+async function generateOpenAiImage(settings: ActiveAiSettings, prompt: string, size: ImageSize) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -37,7 +40,7 @@ async function generateOpenAiImage(settings: ActiveAiSettings, prompt: string) {
       tools: [
         {
           type: "image_generation",
-          size: "1024x1024",
+          size,
           quality: "medium",
           format: "png",
         },
@@ -61,14 +64,15 @@ async function generateOpenAiImage(settings: ActiveAiSettings, prompt: string) {
   };
 }
 
-async function generateGeminiImage(settings: ActiveAiSettings, prompt: string) {
+async function generateGeminiImage(settings: ActiveAiSettings, prompt: string, size: ImageSize) {
+  const sizedPrompt = `${prompt}\n\nCreate the image with this target aspect and size: ${size}.`;
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${encodeURIComponent(settings.apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        contents: [{ role: "user", parts: [{ text: sizedPrompt }] }],
         generationConfig: {
           responseModalities: ["TEXT", "IMAGE"],
         },

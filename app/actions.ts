@@ -25,10 +25,17 @@ import {
   signupSchema,
   wordpressConnectionSchema,
 } from "@/lib/validators";
-import { createContent, createOutline, reviseContent, reviseOutline } from "@/lib/ai";
+import {
+  analyzeContentWithAi,
+  createContent,
+  createOutline,
+  reviseContent,
+  reviseOutline,
+} from "@/lib/ai";
+import type { AiContentReport } from "@/lib/ai";
 import { getActiveAiSettings, getAiSettings } from "@/lib/aiSettings";
 import { generateImageWithAi } from "@/lib/imageAi";
-import type { GeneratedImage } from "@/lib/imageAi";
+import type { GeneratedImage, ImageSize } from "@/lib/imageAi";
 import { createShopifyDraft, validateShopifyConnection } from "@/lib/shopify";
 import {
   createWordPressDraft,
@@ -344,12 +351,44 @@ export async function generateImageAction(
       throw new Error("Add an API key for GPT or Gemini and select it as active before creating images.");
     }
 
-    const image = await generateImageWithAi(settings, prompt);
+    const size = parseImageSize(formData.get("size"));
+    const image = await generateImageWithAi(settings, prompt, size);
 
     return { ok: true, data: image };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
+}
+
+export async function generateBlogImageAction(input: {
+  prompt: string;
+  size: ImageSize;
+}): Promise<ActionResult<GeneratedImage>> {
+  try {
+    const session = await requireSession();
+    const prompt = input.prompt.trim();
+
+    if (prompt.length < 10) {
+      throw new Error("Describe the image you want in at least 10 characters.");
+    }
+
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+
+    if (!settings) {
+      throw new Error("Add an API key for GPT or Gemini and select it as active before creating images.");
+    }
+
+    const image = await generateImageWithAi(settings, prompt, parseImageSize(input.size));
+
+    return { ok: true, data: image };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+function parseImageSize(value: unknown): ImageSize {
+  if (value === "1024x1536" || value === "1536x1024") return value;
+  return "1024x1024";
 }
 
 export async function generateOutlineAction(input: {
@@ -449,6 +488,7 @@ export async function generateContentAction(input: {
     contentHtml: string;
     metaTitle: string;
     metaDescription: string;
+    aiReport: AiContentReport;
   }>
 > {
   try {
@@ -480,6 +520,16 @@ export async function generateContentAction(input: {
       outline,
       settings,
     );
+    const aiReport = await analyzeContentWithAi(
+      {
+        keyword: project.keyword,
+        secondaryKeywords: project.secondaryKeywords,
+        seoEntities: project.seoEntities,
+        prompt: project.prompt,
+      },
+      content,
+      settings,
+    );
 
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(
       { _id: project._id, userId: session.objectUserId },
@@ -496,7 +546,7 @@ export async function generateContentAction(input: {
       },
     );
 
-    return { ok: true, data: content };
+    return { ok: true, data: { ...content, aiReport } };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
@@ -517,6 +567,7 @@ export async function refineContentAction(input: {
     contentHtml: string;
     metaTitle: string;
     metaDescription: string;
+    aiReport: AiContentReport;
   }>
 > {
   try {
@@ -555,6 +606,22 @@ export async function refineContentAction(input: {
       instruction: input.instruction,
       settings,
     });
+    const aiReport = await analyzeContentWithAi(
+      {
+        keyword: project.keyword,
+        secondaryKeywords: project.secondaryKeywords,
+        seoEntities: project.seoEntities,
+        prompt: project.prompt,
+      },
+      {
+        title: content.title,
+        slug: content.slug,
+        contentHtml: content.contentHtml,
+        metaTitle: content.metaTitle,
+        metaDescription: content.metaDescription,
+      },
+      settings,
+    );
 
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(
       { _id: project._id, userId: session.objectUserId },
@@ -571,7 +638,60 @@ export async function refineContentAction(input: {
       },
     );
 
-    return { ok: true, data: content };
+    return { ok: true, data: { ...content, aiReport } };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function analyzeContentAction(input: {
+  projectId: string;
+  title: string;
+  contentHtml: string;
+  slug: string;
+  metaTitle: string;
+  metaDescription: string;
+}): Promise<ActionResult<AiContentReport>> {
+  try {
+    const session = await requireSession();
+
+    if (!ObjectId.isValid(input.projectId)) {
+      throw new Error("Invalid project.");
+    }
+
+    if (!input.title.trim() || input.contentHtml.trim().length < 100) {
+      throw new Error("Add a title and complete article content before checking it.");
+    }
+
+    const db = await getDb();
+    const project = await db.collection<BlogProjectDocument>("blogProjects").findOne({
+      _id: new ObjectId(input.projectId),
+      userId: session.objectUserId,
+    });
+
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+    const report = await analyzeContentWithAi(
+      {
+        keyword: project.keyword,
+        secondaryKeywords: project.secondaryKeywords,
+        seoEntities: project.seoEntities,
+        prompt: project.prompt,
+      },
+      {
+        title: input.title,
+        slug: input.slug,
+        contentHtml: input.contentHtml,
+        metaTitle: input.metaTitle,
+        metaDescription: input.metaDescription,
+      },
+      settings,
+    );
+
+    return { ok: true, data: report };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }

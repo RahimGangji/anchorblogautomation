@@ -4,17 +4,22 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ReactNode } from "react";
 import { Mark, Node, mergeAttributes } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import toast from "react-hot-toast";
 import {
   ArrowRight,
   BarChart3,
   Bold,
-  CheckCircle2,
   FileText,
   Heading1,
   Heading2,
   Heading3,
+  Heading4,
+  Heading5,
+  Heading6,
   ImagePlus,
   Italic,
   Minus,
@@ -30,9 +35,10 @@ import {
   Trash2,
   Type,
   Undo2,
-  XCircle,
 } from "lucide-react";
 import {
+  analyzeContentAction,
+  generateBlogImageAction,
   generateContentAction,
   generateOutlineAction,
   publishDraftAction,
@@ -40,10 +46,16 @@ import {
   refineOutlineAction,
 } from "@/app/actions";
 import type { BlogOutline } from "@/lib/types";
-import { analyzeYoastSeo } from "@/lib/yoastSeo";
-import type { YoastIssue, YoastReport } from "@/lib/yoastSeo";
+import type { AiContentReport } from "@/lib/ai";
+import type { GeneratedImage, ImageSize } from "@/lib/imageAi";
 
 type Step = "brief" | "outline" | "content";
+type LinkEditState = {
+  from: number;
+  to: number;
+  keyword: string;
+  href: string;
+};
 
 const emptyOutline: BlogOutline = {
   title: "",
@@ -52,6 +64,88 @@ const emptyOutline: BlogOutline = {
 
 const fontSizes = [12, 14, 16, 18, 20, 24, 28, 32];
 const defaultFontSize = 16;
+
+const LinkMark = Mark.create({
+  name: "link",
+  inclusive: false,
+
+  addAttributes() {
+    return {
+      href: { default: null },
+      target: { default: null },
+      rel: { default: null },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "a[href]" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "a",
+      mergeAttributes(HTMLAttributes, {
+        class: "internal-link",
+      }),
+      0,
+    ];
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations: (state) => {
+            const decorations: Decoration[] = [];
+
+            state.doc.descendants((node, pos) => {
+              if (!node.isText) return;
+
+              const linkMark = node.marks.find((mark) => mark.type.name === this.name);
+              const href = typeof linkMark?.attrs.href === "string" ? linkMark.attrs.href : "";
+              if (!href) return;
+
+              const from = pos;
+              const to = pos + node.nodeSize;
+
+              decorations.push(
+                Decoration.widget(
+                  to,
+                  () => {
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "internal-link-edit-button";
+                    button.title = "Edit internal link keyword";
+                    button.setAttribute("aria-label", "Edit internal link keyword");
+                    button.textContent = "\u270E";
+                    button.addEventListener("click", (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      window.dispatchEvent(
+                        new CustomEvent<LinkEditState>("anchorblog:edit-link", {
+                          detail: {
+                            from,
+                            to,
+                            href,
+                            keyword: this.editor.state.doc.textBetween(from, to, " ").trim(),
+                          },
+                        }),
+                      );
+                    });
+                    return button;
+                  },
+                  { key: `edit-link-${from}-${to}-${href}` },
+                ),
+              );
+            });
+
+            return DecorationSet.create(state.doc, decorations);
+          },
+        },
+      }),
+    ];
+  },
+});
 
 const ImageNode = Node.create({
   name: "image",
@@ -104,10 +198,16 @@ const FontSizeMark = Mark.create({
 });
 
 export function BlogWorkflow({
+  canGenerateImage,
   hasConnection,
+  imageModel,
+  imageProvider,
   connectedProvider,
 }: {
+  canGenerateImage: boolean;
   hasConnection: boolean;
+  imageModel: string;
+  imageProvider: string;
   connectedProvider?: string;
 }) {
   const [step, setStep] = useState<Step>("brief");
@@ -124,20 +224,25 @@ export function BlogWorkflow({
   const [slug, setSlug] = useState("");
   const [metaTitle, setMetaTitle] = useState("");
   const [metaDescription, setMetaDescription] = useState("");
-  const [seoReport, setSeoReport] = useState<YoastReport | null>(null);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
+  const [aiReport, setAiReport] = useState<AiContentReport | null>(null);
+  const [linkEdit, setLinkEdit] = useState<LinkEditState | null>(null);
+  const [linkEditKeyword, setLinkEditKeyword] = useState("");
+  const [linkEditHref, setLinkEditHref] = useState("");
+  const [isImageCreatorOpen, setIsImageCreatorOpen] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imageSize, setImageSize] = useState<ImageSize>("1024x1024");
+  const [imageSectionIndex, setImageSectionIndex] = useState(0);
   const [isPending, startTransition] = useTransition();
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const editor = useEditor({
-    extensions: [StarterKit, ImageNode, FontSizeMark],
+    extensions: [StarterKit, LinkMark, ImageNode, FontSizeMark],
     content: contentHtml || "<p></p>",
     immediatelyRender: false,
     editorProps: {
       attributes: {
         class:
-          "min-h-[420px] rounded-b-lg border border-t-0 border-slate-200 bg-white px-4 py-4 text-sm leading-7 outline-none prose prose-slate max-w-none focus:border-slate-950 prose-img:my-6 prose-img:max-w-full",
+          "min-h-[420px] rounded-lg border border-slate-200 bg-white px-4 py-4 text-sm leading-7 outline-none prose prose-slate max-w-none focus:border-slate-950 prose-img:my-6 prose-img:max-w-full",
       },
     },
     onUpdate: ({ editor: activeEditor }) => {
@@ -151,20 +256,50 @@ export function BlogWorkflow({
     }
   }, [contentHtml, editor]);
 
+  useEffect(() => {
+    function openLinkEdit(event: Event) {
+      const detail = (event as CustomEvent<LinkEditState>).detail;
+      if (!detail) return;
+
+      setLinkEdit(detail);
+      setLinkEditKeyword(detail.keyword);
+      setLinkEditHref(detail.href);
+    }
+
+    window.addEventListener("anchorblog:edit-link", openLinkEdit);
+    return () => window.removeEventListener("anchorblog:edit-link", openLinkEdit);
+  }, []);
+
   const canGenerateContent = useMemo(
     () => projectId && outline.title.trim() && outline.sections.length > 0,
     [outline, projectId],
   );
 
+  function closeLinkEditModal() {
+    setLinkEdit(null);
+    setLinkEditKeyword("");
+    setLinkEditHref("");
+  }
+
+  function saveLinkEdit() {
+    if (!linkEdit) return;
+
+    updateLinkKeyword(editor, {
+      from: linkEdit.from,
+      to: linkEdit.to,
+      keyword: linkEditKeyword,
+      href: linkEditHref,
+    });
+    closeLinkEditModal();
+  }
+
   function runAction<T>(action: () => Promise<T>, onSuccess: (result: T) => void) {
-    setError("");
-    setNotice("");
     startTransition(async () => {
       try {
         const result = await action();
         onSuccess(result);
       } catch (actionError) {
-        setError(actionError instanceof Error ? actionError.message : "Something went wrong.");
+        toast.error(actionError instanceof Error ? actionError.message : "Something went wrong.");
       }
     });
   }
@@ -186,7 +321,7 @@ export function BlogWorkflow({
         setOutline(data.outline);
         setTitle(data.outline.title);
         setStep("outline");
-        setNotice("Outline created. You can edit it manually or ask AI to revise it.");
+        toast.success("Outline created. You can edit it manually or ask AI to revise it.");
       },
     );
   }
@@ -206,7 +341,7 @@ export function BlogWorkflow({
         setOutline(data.outline);
         setTitle(data.outline.title);
         setOutlineInstruction("");
-        setNotice("Outline revised.");
+        toast.success("Outline revised.");
       },
     );
   }
@@ -224,8 +359,9 @@ export function BlogWorkflow({
         setContentHtml(data.contentHtml);
         setMetaTitle(data.metaTitle);
         setMetaDescription(data.metaDescription);
+        setAiReport(data.aiReport);
         setStep("content");
-        setNotice("Content generated. Make edits or ask AI for revisions.");
+        toast.success("Content generated and AI SEO report completed.");
       },
     );
   }
@@ -251,15 +387,14 @@ export function BlogWorkflow({
         setContentHtml(data.contentHtml);
         setMetaTitle(data.metaTitle);
         setMetaDescription(data.metaDescription);
+        setAiReport(data.aiReport);
         setContentInstruction("");
-        setNotice("Content revised.");
+        toast.success("Content revised and AI SEO report updated.");
       },
     );
   }
 
   function publishDraft() {
-    if (!runSeoAnalysis()) return;
-
     runAction(
       async () => {
         const result = await publishDraftAction({
@@ -275,7 +410,7 @@ export function BlogWorkflow({
         return result.data;
       },
       (data) => {
-        setNotice(
+        toast.success(
           data.draftLink
             ? `Draft created in ${connectedProvider || data.provider}: ${data.draftLink}`
             : `Draft created in ${connectedProvider || data.provider} with ID ${data.draftId}.`,
@@ -293,29 +428,48 @@ export function BlogWorkflow({
     }));
   }
 
-  function runSeoAnalysis() {
-    if (!keyword.trim()) {
-      setError("Add a primary keyword before running the Yoast SEO check.");
-      return null;
-    }
+  function refreshAiReport() {
+    runAction(
+      async () => {
+        const result = await analyzeContentAction({
+          projectId,
+          title,
+          contentHtml,
+          slug,
+          metaTitle,
+          metaDescription,
+        });
+        if (!result.ok) throw new Error(result.error);
+        return result.data;
+      },
+      (report) => {
+        setAiReport(report);
+        toast.success("AI SEO report updated.");
+      },
+    );
+  }
 
-    if (!contentHtml.trim() || contentHtml.trim() === "<p></p>") {
-      setError("Generate or write content before running the Yoast SEO check.");
-      return null;
-    }
+  function downloadAiReport() {
+    if (!aiReport) return;
 
-    const report = analyzeYoastSeo({
-      contentHtml,
-      primaryKeyword: keyword,
-      metaDescription,
-      metaTitle,
-      slug,
+    const report = buildAiReportDoc({
+      report: aiReport,
       title,
+      keyword,
+      slug,
+      metaTitle,
+      metaDescription,
     });
-    setSeoReport(report);
-    setError("");
-    setNotice("Yoast SEO check updated.");
-    return report;
+    const blob = new Blob([report], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slug || "ai-seo-report"}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    toast.success("AI report downloaded as a Word document.");
   }
 
   function chooseImage() {
@@ -346,9 +500,35 @@ export function BlogWorkflow({
     reader.readAsDataURL(file);
   }
 
+  function createAndInsertImage() {
+    const targetSection = outline.sections[imageSectionIndex];
+
+    if (!targetSection) {
+      toast.error("Choose a section where the image should be added.");
+      return;
+    }
+
+    runAction(
+      async () => {
+        const result = await generateBlogImageAction({
+          prompt: imagePrompt,
+          size: imageSize,
+        });
+        if (!result.ok) throw new Error(result.error);
+        return result.data;
+      },
+      (image) => {
+        insertGeneratedImageAfterSection(editor, image, targetSection.heading);
+        setImagePrompt("");
+        setIsImageCreatorOpen(false);
+        toast.success("Image created and inserted into the content.");
+      },
+    );
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-      <aside className="space-y-3">
+    <div className="grid min-w-0 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <aside className="min-w-0 space-y-3">
         <StepButton active={step === "brief"} icon={<Sparkles size={18} />} label="Brief" />
         <StepButton active={step === "outline"} icon={<ListPlus size={18} />} label="Outline" />
         <StepButton active={step === "content"} icon={<FileText size={18} />} label="Content" />
@@ -357,20 +537,17 @@ export function BlogWorkflow({
             Connect WordPress or Shopify before publishing a draft.
           </p>
         ) : null}
+        {step === "content" ? (
+          <AiSeoReportPanel
+            report={aiReport}
+            isPending={isPending}
+            onRefresh={refreshAiReport}
+            onDownload={downloadAiReport}
+          />
+        ) : null}
       </aside>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        {notice ? (
-          <p className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {notice}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="mb-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {error}
-          </p>
-        ) : null}
-
+      <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         {step === "brief" ? (
           <div className="space-y-5">
             <div>
@@ -599,11 +776,6 @@ export function BlogWorkflow({
               }}
             />
             <EditorContent editor={editor} />
-            <YoastSeoPanel
-              report={seoReport}
-              onAnalyze={runSeoAnalysis}
-              primaryKeyword={keyword}
-            />
             <div className="rounded-lg bg-slate-50 p-4">
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">Ask AI to revise content</span>
@@ -625,6 +797,94 @@ export function BlogWorkflow({
                 Revise content
               </button>
             </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">Create blog image</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Generate an image with your active API provider and insert it after a section.
+                  </p>
+                  <p className="mt-2 text-xs font-medium text-slate-500">
+                    Active image model: {imageProvider ? imageProvider.toUpperCase() : "None"}
+                    {imageModel ? ` / ${imageModel}` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsImageCreatorOpen((current) => !current)}
+                  disabled={isPending || !canGenerateImage}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                >
+                  <ImagePlus size={18} />
+                  Create image
+                </button>
+              </div>
+
+              {!canGenerateImage ? (
+                <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
+                  Select and save a GPT or Gemini API key in API Keys to create images.
+                </p>
+              ) : null}
+
+              {isImageCreatorOpen ? (
+                <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 md:grid-cols-2">
+                  <label className="block md:col-span-2">
+                    <span className="text-sm font-medium text-slate-700">Image prompt</span>
+                    <textarea
+                      value={imagePrompt}
+                      onChange={(event) => setImagePrompt(event.target.value)}
+                      rows={4}
+                      placeholder="Create a realistic blog image that visualizes the main idea of this section."
+                      className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-slate-950"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-700">Image size</span>
+                    <select
+                      value={imageSize}
+                      onChange={(event) => setImageSize(event.target.value as ImageSize)}
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
+                    >
+                      <option value="1024x1024">Square 1024 x 1024</option>
+                      <option value="1536x1024">Landscape 1536 x 1024</option>
+                      <option value="1024x1536">Portrait 1024 x 1536</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-700">Add after section</span>
+                    <select
+                      value={imageSectionIndex}
+                      onChange={(event) => setImageSectionIndex(Number(event.target.value))}
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
+                    >
+                      {outline.sections.map((section, index) => (
+                        <option key={`${section.heading}-${index}`} value={index}>
+                          {section.heading}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row md:col-span-2">
+                    <button
+                      type="button"
+                      onClick={createAndInsertImage}
+                      disabled={isPending || !imagePrompt.trim() || outline.sections.length === 0}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
+                    >
+                      {isPending ? <Loader2 className="animate-spin" size={18} /> : <ImagePlus size={18} />}
+                      {isPending ? "Creating..." : "Create and insert image"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsImageCreatorOpen(false)}
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={publishDraft}
@@ -637,6 +897,62 @@ export function BlogWorkflow({
           </div>
         ) : null}
       </section>
+      {linkEdit ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">Edit internal link</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Update the linked keyword and the internal link URL.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeLinkEditModal}
+                className="rounded-md px-2 py-1 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-5 space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Keyword</span>
+                <input
+                  value={linkEditKeyword}
+                  onChange={(event) => setLinkEditKeyword(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Internal link</span>
+                <input
+                  value={linkEditHref}
+                  onChange={(event) => setLinkEditHref(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeLinkEditModal}
+                className="rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveLinkEdit}
+                disabled={!linkEditKeyword.trim() || !linkEditHref.trim()}
+                className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+              >
+                Save link
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -675,7 +991,7 @@ function RichTextToolbar({
   const currentSize = getCurrentFontSize(editor);
 
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-t-lg border border-slate-200 bg-slate-50 p-2">
+    <div className="mb-2 flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-2">
       <ToolbarButton
         active={editor?.isActive("paragraph")}
         disabled={disabled}
@@ -707,6 +1023,30 @@ function RichTextToolbar({
         onClick={() => applyHeading(editor, 3)}
       >
         <Heading3 size={17} />
+      </ToolbarButton>
+      <ToolbarButton
+        active={editor?.isActive("heading", { level: 4 })}
+        disabled={disabled}
+        label="Heading 4"
+        onClick={() => applyHeading(editor, 4)}
+      >
+        <Heading4 size={17} />
+      </ToolbarButton>
+      <ToolbarButton
+        active={editor?.isActive("heading", { level: 5 })}
+        disabled={disabled}
+        label="Heading 5"
+        onClick={() => applyHeading(editor, 5)}
+      >
+        <Heading5 size={17} />
+      </ToolbarButton>
+      <ToolbarButton
+        active={editor?.isActive("heading", { level: 6 })}
+        disabled={disabled}
+        label="Heading 6"
+        onClick={() => applyHeading(editor, 6)}
+      >
+        <Heading6 size={17} />
       </ToolbarButton>
       <ToolbarDivider />
       <ToolbarButton
@@ -791,73 +1131,64 @@ function RichTextToolbar({
   );
 }
 
-function YoastSeoPanel({
-  onAnalyze,
-  primaryKeyword,
+function AiSeoReportPanel({
+  isPending,
+  onDownload,
+  onRefresh,
   report,
 }: {
-  onAnalyze: () => void;
-  primaryKeyword: string;
-  report: YoastReport | null;
+  isPending: boolean;
+  onDownload: () => void;
+  onRefresh: () => void;
+  report: AiContentReport | null;
 }) {
-  const hasBadIssues = Boolean(
-    report?.seoIssues.some((issue) => issue.rating === "bad") ||
-      report?.readabilityIssues.some((issue) => issue.rating === "bad"),
-  );
-
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="text-emerald-700" size={20} />
-            <h2 className="text-base font-semibold text-slate-950">Yoast SEO check</h2>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            Checks this draft against the primary keyword:{" "}
-            <span className="font-semibold text-slate-800">{primaryKeyword || "not set"}</span>.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onAnalyze}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-        >
-          <BarChart3 size={18} />
-          Run SEO check
-        </button>
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <BarChart3 className="text-emerald-700" size={19} />
+        <h2 className="text-sm font-semibold text-slate-950">AI SEO report</h2>
       </div>
-
       {report ? (
         <div className="mt-4 space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <YoastScoreCard label="SEO" score={report.seoScore} />
-            <YoastScoreCard label="Readability" score={report.readabilityScore} />
-          </div>
-          {hasBadIssues ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
-              Review the red items before drafting. You can still draft after checking, but these
-              are the biggest issues Yoast found.
-            </p>
-          ) : (
-            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-6 text-emerald-800">
-              No major Yoast issues found in the current analysis.
-            </p>
-          )}
-          <YoastIssueList title="SEO analysis" issues={report.seoIssues} />
-          <YoastIssueList title="Readability analysis" issues={report.readabilityIssues} />
+          <ScoreCard label="SEO" score={report.seoScore} />
+          <ScoreCard label="Readability" score={report.readabilityScore} />
+          <p className="text-sm leading-6 text-slate-600">{report.summary}</p>
+          <IssueSummary
+            label="SEO errors"
+            count={report.seoAnalysis.filter((issue) => issue.severity === "error").length}
+          />
+          <IssueSummary
+            label="Readability errors"
+            count={report.readabilityAnalysis.filter((issue) => issue.severity === "error").length}
+          />
+          <button
+            type="button"
+            onClick={onDownload}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            <Save size={17} />
+            Download full report
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isPending}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {isPending ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
+            Update AI check
+          </button>
         </div>
       ) : (
-        <p className="mt-4 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm leading-6 text-slate-600">
-          Run the check before drafting to see keyword, metadata, link, image, and readability
-          feedback.
+        <p className="mt-3 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm leading-6 text-slate-600">
+          AI scores will appear here after content is generated.
         </p>
       )}
     </div>
   );
 }
 
-function YoastScoreCard({ label, score }: { label: string; score: number }) {
+function ScoreCard({ label, score }: { label: string; score: number }) {
   const rating = score >= 70 ? "good" : score >= 50 ? "ok" : "bad";
 
   return (
@@ -872,27 +1203,13 @@ function YoastScoreCard({ label, score }: { label: string; score: number }) {
   );
 }
 
-function YoastIssueList({ issues, title }: { issues: YoastIssue[]; title: string }) {
+function IssueSummary({ count, label }: { count: number; label: string }) {
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
-      <div className="mt-2 space-y-2">
-        {issues.map((issue) => (
-          <div
-            key={`${title}-${issue.id}`}
-            className="flex gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm leading-6"
-          >
-            {issue.rating === "good" ? (
-              <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={18} />
-            ) : issue.rating === "ok" ? (
-              <Sparkles className="mt-0.5 shrink-0 text-amber-600" size={18} />
-            ) : (
-              <XCircle className="mt-0.5 shrink-0 text-rose-600" size={18} />
-            )}
-            <p className="text-slate-700">{issue.text}</p>
-          </div>
-        ))}
-      </div>
+    <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm">
+      <span className="text-slate-600">{label}</span>
+      <span className={count > 0 ? "font-semibold text-rose-600" : "font-semibold text-emerald-600"}>
+        {count}
+      </span>
     </div>
   );
 }
@@ -903,7 +1220,92 @@ function ratingClass(rating: "good" | "ok" | "bad") {
   return "bg-rose-500";
 }
 
-function applyHeading(editor: Editor | null, level: 1 | 2 | 3) {
+function buildAiReportDoc({
+  keyword,
+  metaDescription,
+  metaTitle,
+  report,
+  slug,
+  title,
+}: {
+  keyword: string;
+  metaDescription: string;
+  metaTitle: string;
+  report: AiContentReport;
+  slug: string;
+  title: string;
+}) {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>AI SEO and Readability Report</title>
+    <style>
+      body { color: #0f172a; font-family: Arial, sans-serif; line-height: 1.5; }
+      h1 { font-size: 24px; }
+      h2 { border-bottom: 1px solid #e2e8f0; font-size: 18px; padding-bottom: 6px; }
+      table { border-collapse: collapse; margin: 16px 0; width: 100%; }
+      td, th { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+      .score { font-size: 18px; font-weight: 700; }
+      .error { color: #be123c; font-weight: 700; }
+      .warning { color: #b45309; font-weight: 700; }
+      .good { color: #047857; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <h1>AI SEO and Readability Report</h1>
+    <table>
+      <tr><th>Title</th><td>${escapeHtml(title || "Untitled")}</td></tr>
+      <tr><th>Primary keyword</th><td>${escapeHtml(keyword || "Not set")}</td></tr>
+      <tr><th>Slug</th><td>${escapeHtml(slug || "Not set")}</td></tr>
+      <tr><th>Meta title</th><td>${escapeHtml(metaTitle || "Not set")}</td></tr>
+      <tr><th>Meta description</th><td>${escapeHtml(metaDescription || "Not set")}</td></tr>
+    </table>
+    <p class="score">SEO score: ${report.seoScore}/100</p>
+    <p class="score">Readability score: ${report.readabilityScore}/100</p>
+    <h2>Summary</h2>
+    <p>${escapeHtml(report.summary)}</p>
+    <h2>SEO analysis</h2>
+    ${formatReportIssues(report.seoAnalysis)}
+    <h2>Readability analysis</h2>
+    ${formatReportIssues(report.readabilityAnalysis)}
+  </body>
+</html>`;
+}
+
+function formatReportIssues(issues: AiContentReport["seoAnalysis"]) {
+  if (issues.length === 0) return "<p>No issues reported.</p>";
+
+  const rows = issues
+    .map(
+      (issue, index) => `<tr>
+        <td>${index + 1}</td>
+        <td class="${issue.severity}">${escapeHtml(issue.severity.toUpperCase())}</td>
+        <td>${escapeHtml(issue.location)}</td>
+        <td>${escapeHtml(issue.issue)}</td>
+        <td>${escapeHtml(issue.recommendation)}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<table>
+    <thead>
+      <tr><th>#</th><th>Severity</th><th>Location</th><th>Issue</th><th>Recommendation</th></tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function applyHeading(editor: Editor | null, level: 1 | 2 | 3 | 4 | 5 | 6) {
   if (!editor) return;
 
   const { from, to, empty } = editor.state.selection;
@@ -927,6 +1329,84 @@ function applyHeading(editor: Editor | null, level: 1 | 2 | 3) {
       content: [{ type: "text", text: selectedText }],
     })
     .run();
+}
+
+function updateLinkKeyword(
+  editor: Editor | null,
+  {
+    from,
+    to,
+    keyword,
+    href,
+  }: {
+    from: number;
+    to: number;
+    keyword: string;
+    href: string;
+  },
+) {
+  if (!editor) return;
+
+  const nextKeyword = keyword.trim();
+  const nextHref = href.trim();
+  if (!nextKeyword || !nextHref) return;
+
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(
+      { from, to },
+      {
+        type: "text",
+        text: nextKeyword,
+        marks: [
+          {
+            type: "link",
+            attrs: { href: nextHref },
+          },
+        ],
+      },
+    )
+    .run();
+}
+
+function insertGeneratedImageAfterSection(
+  editor: Editor | null,
+  image: GeneratedImage,
+  sectionHeading: string,
+) {
+  if (!editor) return;
+
+  const targetHeading = normalizeText(sectionHeading);
+  let insertAt = editor.state.doc.content.size;
+
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== "heading") return true;
+    if (normalizeText(node.textContent) !== targetHeading) return true;
+
+    insertAt = pos + node.nodeSize;
+    return false;
+  });
+
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(insertAt, [
+      {
+        type: "image",
+        attrs: {
+          src: image.dataUrl,
+          alt: sectionHeading,
+          title: sectionHeading,
+        },
+      },
+      { type: "paragraph" },
+    ])
+    .run();
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function getCurrentFontSize(editor: Editor | null) {

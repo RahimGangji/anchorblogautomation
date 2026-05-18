@@ -85,6 +85,21 @@ export const contentSchema = z.object({
   metaDescription: z.string().trim().min(40).max(180),
 });
 
+const aiContentIssueSchema = z.object({
+  severity: z.enum(["good", "warning", "error"]),
+  location: z.string().trim().min(2),
+  issue: z.string().trim().min(2),
+  recommendation: z.string().trim().min(2),
+});
+
+export const aiContentReportSchema = z.object({
+  seoScore: z.coerce.number().min(0).max(100).transform(Math.round),
+  readabilityScore: z.coerce.number().min(0).max(100).transform(Math.round),
+  summary: z.string().trim().min(10),
+  seoAnalysis: z.array(aiContentIssueSchema),
+  readabilityAnalysis: z.array(aiContentIssueSchema),
+});
+
 export const createOutlineSchema = z.object({
   keyword: z.string().trim().min(2, "Keyword is required."),
   secondaryKeywords: z.string().trim().optional().default(""),

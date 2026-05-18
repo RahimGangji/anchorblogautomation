@@ -1,5 +1,6 @@
 import Groq from "groq-sdk";
-import { contentSchema, outlineSchema } from "@/lib/validators";
+import type { z } from "zod";
+import { aiContentReportSchema, contentSchema, outlineSchema } from "@/lib/validators";
 import type { BlogOutline } from "@/lib/types";
 import type { ActiveAiSettings } from "@/lib/aiSettings";
 
@@ -255,6 +256,8 @@ type SeoBrief = {
   prompt: string;
 };
 
+export type AiContentReport = z.infer<typeof aiContentReportSchema>;
+
 function formatSeoBrief(brief: SeoBrief) {
   return `Primary keyword: ${brief.keyword}
 Secondary keywords: ${brief.secondaryKeywords?.trim() || "None provided"}
@@ -303,13 +306,13 @@ export async function createContent(
   settings?: ActiveAiSettings | null,
 ) {
   const json = await completeJson(
-    "You write publish-ready blog articles. Return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. contentHtml must use semantic HTML tags such as h2, h3, p, ul, li, strong, and a where useful. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
+    "You write publish-ready blog articles. Return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. contentHtml must use semantic HTML tags such as h2, h3, p, ul, li, strong, and a where useful. Internal links must be valid <a href=\"...\">keyword phrase</a> tags, and the anchor text must be the relevant keyword phrase, not a bare URL. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
     `${formatSeoBrief(brief)}
 
 Outline:
 ${JSON.stringify(outline, null, 2)}
 
-Write a polished blog post from this outline. Treat the primary keyword as the main target, weave in secondary keywords only where natural, and cover SEO entities with useful context instead of stuffing terms. Include a concise intro, actionable sections, and a natural conclusion. Generate a WordPress-ready slug, SEO meta title, and meta description within the character limits.`,
+Write a polished blog post from this outline. Treat the primary keyword as the main target, weave in secondary keywords only where natural, and cover SEO entities with useful context instead of stuffing terms. When adding internal links, link the keyword phrase itself as the anchor text. Include a concise intro, actionable sections, and a natural conclusion. Generate a WordPress-ready slug, SEO meta title, and meta description within the character limits.`,
     settings,
   );
 
@@ -330,7 +333,7 @@ export async function reviseContent(params: {
   settings?: ActiveAiSettings | null;
 }) {
   const json = await completeJson(
-    "You revise blog content based on user instructions. Preserve unchanged sections and return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
+    "You revise blog content based on user instructions. Preserve unchanged sections and return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. Preserve internal links as valid <a href=\"...\">keyword phrase</a> tags, and ensure the anchor text is the relevant keyword phrase, not a bare URL. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
     `${formatSeoBrief({
       keyword: params.keyword,
       secondaryKeywords: params.secondaryKeywords,
@@ -361,4 +364,41 @@ Keep the article aligned with the primary keyword, supporting secondary keywords
   );
 
   return contentSchema.parse(normalizeContentJson(json));
+}
+
+export async function analyzeContentWithAi(
+  brief: SeoBrief,
+  input: {
+    title: string;
+    slug: string;
+    contentHtml: string;
+    metaTitle: string;
+    metaDescription: string;
+  },
+  settings?: ActiveAiSettings | null,
+) {
+  const json = await completeJson(
+    "You are an expert SEO and readability auditor. Return only valid JSON with seoScore, readabilityScore, summary, seoAnalysis, and readabilityAnalysis. Scores must be whole numbers from 0 to 100. seoAnalysis and readabilityAnalysis must be arrays of findings with severity, location, issue, and recommendation. severity must be one of good, warning, or error.",
+    `${formatSeoBrief(brief)}
+
+Article title:
+${input.title}
+
+Slug:
+${input.slug}
+
+Meta title:
+${input.metaTitle}
+
+Meta description:
+${input.metaDescription}
+
+Content HTML:
+${input.contentHtml}
+
+Score the article for SEO out of 100 and readability out of 100. Check keyword usage, title/meta alignment, headings, search intent, internal links, external links, image/alt opportunities, paragraph length, sentence clarity, structure, scannability, and obvious missing sections. Include exact locations such as heading names, paragraph descriptions, metadata fields, or "overall article" so the user knows where each issue is. Include both errors and strengths where useful.`,
+    settings,
+  );
+
+  return aiContentReportSchema.parse(json);
 }

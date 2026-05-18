@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 import { AppShell } from "@/components/AppShell";
 import { BlogWorkflow } from "@/components/BlogWorkflow";
 import { requireUser } from "@/lib/auth";
+import { getActiveAiSettings, getAiSettings } from "@/lib/aiSettings";
 import { getDb } from "@/lib/db";
 import type { ShopifyConnectionDocument, WordPressConnectionDocument } from "@/lib/types";
 
@@ -9,7 +10,7 @@ export default async function CreatePage() {
   const user = await requireUser();
   const db = await getDb();
   const userId = new ObjectId(user.id);
-  const [wordpressConnection, shopifyConnection] = await Promise.all([
+  const [wordpressConnection, shopifyConnection, aiSettings] = await Promise.all([
     db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
       userId,
       status: "connected",
@@ -18,12 +19,20 @@ export default async function CreatePage() {
       userId,
       status: "connected",
     }),
+    getAiSettings(userId),
   ]);
   const connectedProvider = wordpressConnection ? "WordPress" : shopifyConnection ? "Shopify" : "";
+  const activeAiSettings = getActiveAiSettings(aiSettings);
 
   return (
     <AppShell user={user}>
-      <BlogWorkflow hasConnection={Boolean(connectedProvider)} connectedProvider={connectedProvider} />
+      <BlogWorkflow
+        hasConnection={Boolean(connectedProvider)}
+        connectedProvider={connectedProvider}
+        imageModel={activeAiSettings?.model ?? ""}
+        imageProvider={activeAiSettings?.provider ?? ""}
+        canGenerateImage={Boolean(activeAiSettings && activeAiSettings.provider !== "claude")}
+      />
     </AppShell>
   );
 }
