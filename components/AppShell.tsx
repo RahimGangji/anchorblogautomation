@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { ChevronDown, KeyRound, LogOut, Menu, PenLine, PlugZap, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -41,11 +42,15 @@ export function AppShell({ user, children }: AppShellProps) {
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <Link
-            href="/dashboard"
-            className="min-w-0 shrink truncate text-base font-bold tracking-tight text-slate-950"
-          >
-            AnchorBlog Automation
+          <Link href="/dashboard" className="min-w-0 shrink-0" aria-label="AnchorBlog dashboard">
+            <Image
+              src="https://cdn-ilekopg.nitrocdn.com/YMtCiafycjbgAwDhTkGWcdptBzZwQGxH/assets/images/optimized/rev-a07950c/www.anchortextor.io/wp-content/uploads/2025/03/logo.png"
+              alt="AnchorBlog Automation"
+              width={220}
+              height={54}
+              unoptimized
+              className="h-11 w-auto max-w-[200px] object-contain sm:max-w-[240px]"
+            />
           </Link>
           <nav className="hidden min-w-0 items-center gap-1 md:flex">
             {navItems.map((item) => {

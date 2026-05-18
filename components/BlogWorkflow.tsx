@@ -22,6 +22,7 @@ import {
   Heading6,
   ImagePlus,
   Italic,
+  Link2,
   Minus,
   ListPlus,
   List,
@@ -55,6 +56,7 @@ type LinkEditState = {
   to: number;
   keyword: string;
   href: string;
+  mode?: "edit" | "insert";
 };
 
 const emptyOutline: BlogOutline = {
@@ -284,12 +286,22 @@ export function BlogWorkflow({
   function saveLinkEdit() {
     if (!linkEdit) return;
 
-    updateLinkKeyword(editor, {
-      from: linkEdit.from,
-      to: linkEdit.to,
-      keyword: linkEditKeyword,
-      href: linkEditHref,
-    });
+    if (linkEdit.mode === "insert") {
+      insertInternalLink(editor, {
+        from: linkEdit.from,
+        to: linkEdit.to,
+        keyword: linkEditKeyword,
+        href: linkEditHref,
+      });
+    } else {
+      updateLinkKeyword(editor, {
+        from: linkEdit.from,
+        to: linkEdit.to,
+        keyword: linkEditKeyword,
+        href: linkEditHref,
+      });
+    }
+
     closeLinkEditModal();
   }
 
@@ -764,7 +776,15 @@ export function BlogWorkflow({
                 className="mt-2 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
               />
             </label>
-            <RichTextToolbar editor={editor} onInsertImage={chooseImage} />
+            <RichTextToolbar
+              editor={editor}
+              onInsertImage={chooseImage}
+              onInsertLink={(link) => {
+                setLinkEdit({ ...link, href: "", mode: "insert" });
+                setLinkEditKeyword(link.keyword);
+                setLinkEditHref("");
+              }}
+            />
             <input
               ref={imageInputRef}
               type="file"
@@ -902,9 +922,13 @@ export function BlogWorkflow({
           <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Edit internal link</h2>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  {linkEdit.mode === "insert" ? "Add internal link" : "Edit internal link"}
+                </h2>
                 <p className="mt-1 text-sm leading-6 text-slate-600">
-                  Update the linked keyword and the internal link URL.
+                  {linkEdit.mode === "insert"
+                    ? "Add a linked keyword and internal link URL to the content."
+                    : "Update the linked keyword and the internal link URL."}
                 </p>
               </div>
               <button
@@ -947,7 +971,7 @@ export function BlogWorkflow({
                 disabled={!linkEditKeyword.trim() || !linkEditHref.trim()}
                 className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
               >
-                Save link
+                {linkEdit.mode === "insert" ? "Add link" : "Save link"}
               </button>
             </div>
           </div>
@@ -983,9 +1007,11 @@ function StepButton({
 function RichTextToolbar({
   editor,
   onInsertImage,
+  onInsertLink,
 }: {
   editor: Editor | null;
   onInsertImage: () => void;
+  onInsertLink: (link: { from: number; to: number; keyword: string }) => void;
 }) {
   const disabled = !editor;
   const currentSize = getCurrentFontSize(editor);
@@ -1111,6 +1137,14 @@ function RichTextToolbar({
       <ToolbarDivider />
       <ToolbarButton disabled={disabled} label="Add image from device" onClick={onInsertImage}>
         <ImagePlus size={17} />
+      </ToolbarButton>
+      <ToolbarButton
+        active={editor?.isActive("link")}
+        disabled={disabled}
+        label="Add internal link"
+        onClick={() => startInternalLinkInsert(editor, onInsertLink)}
+      >
+        <Link2 size={17} />
       </ToolbarButton>
       <ToolbarDivider />
       <ToolbarButton
@@ -1332,6 +1366,57 @@ function applyHeading(editor: Editor | null, level: 1 | 2 | 3 | 4 | 5 | 6) {
 }
 
 function updateLinkKeyword(
+  editor: Editor | null,
+  {
+    from,
+    to,
+    keyword,
+    href,
+  }: {
+    from: number;
+    to: number;
+    keyword: string;
+    href: string;
+  },
+) {
+  if (!editor) return;
+
+  const nextKeyword = keyword.trim();
+  const nextHref = href.trim();
+  if (!nextKeyword || !nextHref) return;
+
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(
+      { from, to },
+      {
+        type: "text",
+        text: nextKeyword,
+        marks: [
+          {
+            type: "link",
+            attrs: { href: nextHref },
+          },
+        ],
+      },
+    )
+    .run();
+}
+
+function startInternalLinkInsert(
+  editor: Editor | null,
+  onInsertLink: (link: { from: number; to: number; keyword: string }) => void,
+) {
+  if (!editor) return;
+
+  const { from, to } = editor.state.selection;
+  const keyword = editor.state.doc.textBetween(from, to, " ").trim();
+
+  onInsertLink({ from, to, keyword });
+}
+
+function insertInternalLink(
   editor: Editor | null,
   {
     from,
