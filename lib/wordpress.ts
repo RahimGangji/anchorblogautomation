@@ -29,6 +29,15 @@ function postsCreateUrl(baseUrl: string): string {
   return u.href;
 }
 
+function mediaCreateUrl(baseUrl: string): string {
+  const u = new URL(`${normalizeSiteUrl(baseUrl)}/wp-json/wp/v2/media`);
+  u.searchParams.set(
+    "_anchor_req",
+    `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+  );
+  return u.href;
+}
+
 /**
  * Follows redirects that commonly break Basic auth (www → apex, http → https).
  * Node fetch often drops Authorization on cross-URL redirects.
@@ -148,8 +157,12 @@ export async function createWordPressDraft(
   title: string,
   contentHtml: string,
   slug: string,
+  featuredImage?: { dataUrl: string; fileName: string; mimeType: string } | null,
 ) {
   const baseUrl = await resolveWordPressBaseUrl(normalizeSiteUrl(connection.siteUrl));
+  const featuredMediaId = featuredImage
+    ? await uploadWordPressMedia(connection, baseUrl, featuredImage)
+    : undefined;
   const response = await fetch(postsCreateUrl(baseUrl), {
     method: "POST",
     headers: {
@@ -164,6 +177,7 @@ export async function createWordPressDraft(
       slug,
       content: contentHtml,
       status: "draft",
+      ...(featuredMediaId ? { featured_media: featuredMediaId } : {}),
     }),
   });
 
@@ -181,4 +195,49 @@ export async function createWordPressDraft(
     id: Number(body.id),
     link: typeof body.link === "string" ? body.link : "",
   };
+}
+
+async function uploadWordPressMedia(
+  connection: WordPressConnectionDocument,
+  baseUrl: string,
+  image: { dataUrl: string; fileName: string; mimeType: string },
+) {
+  const bytes = dataUrlToBytes(image.dataUrl);
+  const response = await fetch(mediaCreateUrl(baseUrl), {
+    method: "POST",
+    headers: {
+      Authorization: authorizationHeaderForWordPress(connection),
+      "Content-Type": image.mimeType,
+      "Content-Disposition": `attachment; filename="${sanitizeFilename(image.fileName)}"`,
+      Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+    body: bytes,
+  });
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      typeof body?.message === "string"
+        ? body.message
+        : `WordPress media upload returned status ${response.status}.`;
+    throw new Error(message);
+  }
+
+  if (typeof body?.id !== "number") {
+    throw new Error("WordPress uploaded the featured image but did not return a media ID.");
+  }
+
+  return body.id;
+}
+
+function dataUrlToBytes(dataUrl: string) {
+  const [, base64] = dataUrl.split(",");
+  if (!base64) throw new Error("Featured image data is invalid.");
+  return Buffer.from(base64, "base64");
+}
+
+function sanitizeFilename(fileName: string) {
+  return fileName.trim().replace(/[^a-zA-Z0-9._-]/g, "-") || "featured-image.png";
 }

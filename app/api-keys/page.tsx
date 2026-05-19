@@ -2,7 +2,13 @@ import { ObjectId } from "mongodb";
 import { AppShell } from "@/components/AppShell";
 import { AiSettingsForm } from "@/components/AiSettingsForm";
 import { requireUser } from "@/lib/auth";
-import { defaultAiSettings, getAiSettings } from "@/lib/aiSettings";
+import {
+  defaultAiSettings,
+  getAiSettings,
+  normalizeClaudeModel,
+  normalizeGeminiModel,
+  normalizeGptModel,
+} from "@/lib/aiSettings";
 
 export default async function ApiKeysPage() {
   const user = await requireUser();
@@ -21,11 +27,11 @@ export default async function ApiKeysPage() {
           <AiSettingsForm
             initial={{
               activeProvider: settings?.activeProvider ?? defaultAiSettings.activeProvider,
-              gptModel: settings?.gptModel ?? defaultAiSettings.gptModel,
+              gptModel: normalizeGptModel(settings?.gptModel),
               hasGptKey: Boolean(settings?.gptApiKey),
-              claudeModel: settings?.claudeModel ?? defaultAiSettings.claudeModel,
+              claudeModel: normalizeClaudeModel(settings?.claudeModel),
               hasClaudeKey: Boolean(settings?.claudeApiKey),
-              geminiModel: settings?.geminiModel ?? defaultAiSettings.geminiModel,
+              geminiModel: normalizeGeminiModel(settings?.geminiModel),
               hasGeminiKey: Boolean(settings?.geminiApiKey),
             }}
           />

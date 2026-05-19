@@ -3,6 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { BlogWorkflow } from "@/components/BlogWorkflow";
 import { requireUser } from "@/lib/auth";
 import { getActiveAiSettings, getAiSettings } from "@/lib/aiSettings";
+import { imageModelForProvider } from "@/lib/aiModels";
 import { getDb } from "@/lib/db";
 import type { ShopifyConnectionDocument, WordPressConnectionDocument } from "@/lib/types";
 
@@ -29,7 +30,7 @@ export default async function CreatePage() {
       <BlogWorkflow
         hasConnection={Boolean(connectedProvider)}
         connectedProvider={connectedProvider}
-        imageModel={activeAiSettings?.model ?? ""}
+        imageModel={imageModelForProvider(activeAiSettings?.provider, activeAiSettings?.model)}
         imageProvider={activeAiSettings?.provider ?? ""}
         canGenerateImage={Boolean(activeAiSettings && activeAiSettings.provider !== "claude")}
       />

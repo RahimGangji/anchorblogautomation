@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ReactNode } from "react";
+import Image from "next/image";
 import { Mark, Node, mergeAttributes } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
@@ -234,8 +235,14 @@ export function BlogWorkflow({
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageSize, setImageSize] = useState<ImageSize>("1024x1024");
   const [imageSectionIndex, setImageSectionIndex] = useState(0);
+  const [featuredImage, setFeaturedImage] = useState<{
+    dataUrl: string;
+    fileName: string;
+    mimeType: string;
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const featuredImageInputRef = useRef<HTMLInputElement>(null);
 
   const editor = useEditor({
     extensions: [StarterKit, LinkMark, ImageNode, FontSizeMark],
@@ -417,6 +424,7 @@ export function BlogWorkflow({
           slug,
           metaTitle,
           metaDescription,
+          featuredImage,
         });
         if (!result.ok) throw new Error(result.error);
         return result.data;
@@ -461,29 +469,6 @@ export function BlogWorkflow({
     );
   }
 
-  function downloadAiReport() {
-    if (!aiReport) return;
-
-    const report = buildAiReportDoc({
-      report: aiReport,
-      title,
-      keyword,
-      slug,
-      metaTitle,
-      metaDescription,
-    });
-    const blob = new Blob([report], { type: "application/msword;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${slug || "ai-seo-report"}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    toast.success("AI report downloaded as a Word document.");
-  }
-
   function chooseImage() {
     imageInputRef.current?.click();
   }
@@ -508,6 +493,29 @@ export function BlogWorkflow({
           },
         })
         .run();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function chooseFeaturedImage() {
+    featuredImageInputRef.current?.click();
+  }
+
+  function updateFeaturedImage(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file for the featured image.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      setFeaturedImage({
+        dataUrl: reader.result,
+        fileName: file.name,
+        mimeType: file.type || "image/png",
+      });
     };
     reader.readAsDataURL(file);
   }
@@ -554,7 +562,6 @@ export function BlogWorkflow({
             report={aiReport}
             isPending={isPending}
             onRefresh={refreshAiReport}
-            onDownload={downloadAiReport}
           />
         ) : null}
       </aside>
@@ -795,6 +802,62 @@ export function BlogWorkflow({
                 event.target.value = "";
               }}
             />
+            <input
+              ref={featuredImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => {
+                updateFeaturedImage(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-slate-950">Featured image</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Add the main image that appears as the blog post thumbnail or header image.
+                  </p>
+                  {featuredImage ? (
+                    <p className="mt-2 break-words text-xs font-medium text-slate-500">
+                      Selected: {featuredImage.fileName}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  {featuredImage ? (
+                    <button
+                      type="button"
+                      onClick={() => setFeaturedImage(null)}
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={chooseFeaturedImage}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+                  >
+                    <ImagePlus size={18} />
+                    {featuredImage ? "Change image" : "Add image"}
+                  </button>
+                </div>
+              </div>
+              {featuredImage ? (
+                <div className="relative mt-4 aspect-[16/9] w-full overflow-hidden rounded-lg">
+                  <Image
+                    src={featuredImage.dataUrl}
+                    alt=""
+                    fill
+                    unoptimized
+                    className="object-cover"
+                    sizes="(max-width: 1024px) 100vw, 900px"
+                  />
+                </div>
+              ) : null}
+            </div>
             <EditorContent editor={editor} />
             <div className="rounded-lg bg-slate-50 p-4">
               <label className="block">
@@ -858,24 +921,24 @@ export function BlogWorkflow({
                       className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-slate-950"
                     />
                   </label>
-                  <label className="block">
+                  <label className="block min-w-0">
                     <span className="text-sm font-medium text-slate-700">Image size</span>
                     <select
                       value={imageSize}
                       onChange={(event) => setImageSize(event.target.value as ImageSize)}
-                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
+                      className="mt-2 w-full min-w-0 truncate rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
                     >
                       <option value="1024x1024">Square 1024 x 1024</option>
                       <option value="1536x1024">Landscape 1536 x 1024</option>
                       <option value="1024x1536">Portrait 1024 x 1536</option>
                     </select>
                   </label>
-                  <label className="block">
+                  <label className="block min-w-0">
                     <span className="text-sm font-medium text-slate-700">Add after section</span>
                     <select
                       value={imageSectionIndex}
                       onChange={(event) => setImageSectionIndex(Number(event.target.value))}
-                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
+                      className="mt-2 w-full min-w-0 truncate rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
                     >
                       {outline.sections.map((section, index) => (
                         <option key={`${section.heading}-${index}`} value={index}>
@@ -1167,12 +1230,10 @@ function RichTextToolbar({
 
 function AiSeoReportPanel({
   isPending,
-  onDownload,
   onRefresh,
   report,
 }: {
   isPending: boolean;
-  onDownload: () => void;
   onRefresh: () => void;
   report: AiContentReport | null;
 }) {
@@ -1195,14 +1256,10 @@ function AiSeoReportPanel({
             label="Readability errors"
             count={report.readabilityAnalysis.filter((issue) => issue.severity === "error").length}
           />
-          <button
-            type="button"
-            onClick={onDownload}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            <Save size={17} />
-            Download full report
-          </button>
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <ReportIssueList title="SEO issues" issues={report.seoAnalysis} />
+            <ReportIssueList title="Readability issues" issues={report.readabilityAnalysis} />
+          </div>
           <button
             type="button"
             onClick={onRefresh}
@@ -1219,6 +1276,43 @@ function AiSeoReportPanel({
         </p>
       )}
     </div>
+  );
+}
+
+function ReportIssueList({
+  issues,
+  title,
+}: {
+  issues: AiContentReport["seoAnalysis"];
+  title: string;
+}) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{title}</h3>
+      {issues.length > 0 ? (
+        <div className="mt-2 space-y-2">
+          {issues.map((issue, index) => (
+            <div
+              key={`${issue.severity}-${issue.location}-${index}`}
+              className={`min-w-0 rounded-lg border px-3 py-2 text-sm ${issueCardClass(issue.severity)}`}
+            >
+              <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <span className="font-semibold capitalize">{issue.severity}</span>
+                <span className="min-w-0 break-words text-xs font-medium leading-5 text-slate-500 sm:text-right">
+                  {issue.location}
+                </span>
+              </div>
+              <p className="mt-2 break-words leading-5 text-slate-700">{issue.issue}</p>
+              <p className="mt-2 break-words leading-5 text-slate-600">{issue.recommendation}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          No issues reported.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -1254,89 +1348,10 @@ function ratingClass(rating: "good" | "ok" | "bad") {
   return "bg-rose-500";
 }
 
-function buildAiReportDoc({
-  keyword,
-  metaDescription,
-  metaTitle,
-  report,
-  slug,
-  title,
-}: {
-  keyword: string;
-  metaDescription: string;
-  metaTitle: string;
-  report: AiContentReport;
-  slug: string;
-  title: string;
-}) {
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>AI SEO and Readability Report</title>
-    <style>
-      body { color: #0f172a; font-family: Arial, sans-serif; line-height: 1.5; }
-      h1 { font-size: 24px; }
-      h2 { border-bottom: 1px solid #e2e8f0; font-size: 18px; padding-bottom: 6px; }
-      table { border-collapse: collapse; margin: 16px 0; width: 100%; }
-      td, th { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
-      .score { font-size: 18px; font-weight: 700; }
-      .error { color: #be123c; font-weight: 700; }
-      .warning { color: #b45309; font-weight: 700; }
-      .good { color: #047857; font-weight: 700; }
-    </style>
-  </head>
-  <body>
-    <h1>AI SEO and Readability Report</h1>
-    <table>
-      <tr><th>Title</th><td>${escapeHtml(title || "Untitled")}</td></tr>
-      <tr><th>Primary keyword</th><td>${escapeHtml(keyword || "Not set")}</td></tr>
-      <tr><th>Slug</th><td>${escapeHtml(slug || "Not set")}</td></tr>
-      <tr><th>Meta title</th><td>${escapeHtml(metaTitle || "Not set")}</td></tr>
-      <tr><th>Meta description</th><td>${escapeHtml(metaDescription || "Not set")}</td></tr>
-    </table>
-    <p class="score">SEO score: ${report.seoScore}/100</p>
-    <p class="score">Readability score: ${report.readabilityScore}/100</p>
-    <h2>Summary</h2>
-    <p>${escapeHtml(report.summary)}</p>
-    <h2>SEO analysis</h2>
-    ${formatReportIssues(report.seoAnalysis)}
-    <h2>Readability analysis</h2>
-    ${formatReportIssues(report.readabilityAnalysis)}
-  </body>
-</html>`;
-}
-
-function formatReportIssues(issues: AiContentReport["seoAnalysis"]) {
-  if (issues.length === 0) return "<p>No issues reported.</p>";
-
-  const rows = issues
-    .map(
-      (issue, index) => `<tr>
-        <td>${index + 1}</td>
-        <td class="${issue.severity}">${escapeHtml(issue.severity.toUpperCase())}</td>
-        <td>${escapeHtml(issue.location)}</td>
-        <td>${escapeHtml(issue.issue)}</td>
-        <td>${escapeHtml(issue.recommendation)}</td>
-      </tr>`,
-    )
-    .join("");
-
-  return `<table>
-    <thead>
-      <tr><th>#</th><th>Severity</th><th>Location</th><th>Issue</th><th>Recommendation</th></tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function issueCardClass(severity: AiContentReport["seoAnalysis"][number]["severity"]) {
+  if (severity === "error") return "border-rose-200 bg-rose-50";
+  if (severity === "warning") return "border-amber-200 bg-amber-50";
+  return "border-emerald-100 bg-emerald-50";
 }
 
 function applyHeading(editor: Editor | null, level: 1 | 2 | 3 | 4 | 5 | 6) {

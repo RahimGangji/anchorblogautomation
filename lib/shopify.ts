@@ -84,6 +84,7 @@ export async function createShopifyDraft(
   title: string,
   contentHtml: string,
   summary: string,
+  featuredImage?: { dataUrl: string; fileName: string; mimeType: string } | null,
 ) {
   const data = await shopifyGraphql<{
     articleCreate: {
@@ -117,6 +118,14 @@ export async function createShopifyDraft(
         author: { name: connection.authorName },
         body: contentHtml,
         summary,
+        ...(featuredImage
+          ? {
+              image: {
+                altText: title,
+                attachment: dataUrlToBase64(featuredImage.dataUrl),
+              },
+            }
+          : {}),
         isPublished: false,
       },
     },
@@ -136,4 +145,10 @@ export async function createShopifyDraft(
     id: article.id,
     link: `https://${connection.shopDomain}/blogs/${article.blog.handle}/${article.handle}`,
   };
+}
+
+function dataUrlToBase64(dataUrl: string) {
+  const [, base64] = dataUrl.split(",");
+  if (!base64) throw new Error("Featured image data is invalid.");
+  return base64;
 }

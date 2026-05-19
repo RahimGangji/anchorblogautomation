@@ -1,4 +1,5 @@
 import type { ActiveAiSettings } from "@/lib/aiSettings";
+import { geminiImageModel } from "@/lib/aiModels";
 
 export type GeneratedImage = {
   dataUrl: string;
@@ -67,7 +68,7 @@ async function generateOpenAiImage(settings: ActiveAiSettings, prompt: string, s
 async function generateGeminiImage(settings: ActiveAiSettings, prompt: string, size: ImageSize) {
   const sizedPrompt = `${prompt}\n\nCreate the image with this target aspect and size: ${size}.`;
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${encodeURIComponent(settings.apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${geminiImageModel}:generateContent?key=${encodeURIComponent(settings.apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -91,7 +92,7 @@ async function generateGeminiImage(settings: ActiveAiSettings, prompt: string, s
     dataUrl: `data:${image.mimeType};base64,${image.data}`,
     mimeType: image.mimeType,
     provider: settings.provider,
-    model: settings.model,
+    model: geminiImageModel,
   };
 }
 

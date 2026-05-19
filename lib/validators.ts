@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { claudeTextModels, geminiTextModels, gptTextModels } from "@/lib/aiModels";
 
 export const signupSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters."),
@@ -107,12 +108,14 @@ export const createOutlineSchema = z.object({
   prompt: z.string().trim().min(10, "Prompt must describe the blog goal."),
 });
 
+const optionalFormString = z.preprocess((value) => (value == null ? "" : value), z.string().trim());
+
 export const aiSettingsSchema = z.object({
   activeProvider: z.enum(["gpt", "claude", "gemini"]),
-  gptApiKey: z.string().trim().optional().default(""),
-  gptModel: z.enum(["gpt-5.4", "gpt-5.5"]),
-  claudeApiKey: z.string().trim().optional().default(""),
-  claudeModel: z.enum(["claude-sonnet-4.6", "claude-haiku-4.5", "claude-opus-4.7"]),
-  geminiApiKey: z.string().trim().optional().default(""),
-  geminiModel: z.enum(["gemini-3.0", "gemini-3.1"]),
+  gptApiKey: optionalFormString,
+  gptModel: z.enum(gptTextModels),
+  claudeApiKey: optionalFormString,
+  claudeModel: z.enum(claudeTextModels),
+  geminiApiKey: optionalFormString,
+  geminiModel: z.enum(geminiTextModels),
 });

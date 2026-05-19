@@ -2,6 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import { ObjectId } from "mongodb";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ZodError } from "zod";
 import { getDb } from "@/lib/db";
@@ -327,10 +328,39 @@ export async function saveAiSettingsAction(
       { upsert: true },
     );
 
+    revalidatePath("/api-keys");
+    revalidatePath("/create");
+    revalidatePath("/create-image");
+
     return { ok: true, data: { saved: true } };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
+}
+
+export async function disconnectAiProviderAction(formData: FormData) {
+  const provider = formData.get("provider");
+  if (provider !== "gpt" && provider !== "claude" && provider !== "gemini") {
+    throw new Error("Choose a valid AI provider to disconnect.");
+  }
+
+  const session = await requireSession();
+  const db = await getDb();
+  const keyField = `${provider}ApiKey`;
+  const now = new Date();
+
+  await db.collection<AiSettingsDocument>("aiSettings").updateOne(
+    { userId: session.objectUserId },
+    {
+      $unset: { [keyField]: "" },
+      $set: { updatedAt: now },
+    },
+  );
+
+  revalidatePath("/api-keys");
+  revalidatePath("/create");
+  revalidatePath("/create-image");
+  redirect("/api-keys");
 }
 
 export async function generateImageAction(
@@ -705,6 +735,11 @@ export async function publishDraftAction(input: {
   slug: string;
   metaTitle: string;
   metaDescription: string;
+  featuredImage?: {
+    dataUrl: string;
+    fileName: string;
+    mimeType: string;
+  } | null;
 }): Promise<ActionResult<{ provider: "wordpress" | "shopify"; draftId: string; draftLink: string }>> {
   try {
     const session = await requireSession();
@@ -754,12 +789,14 @@ export async function publishDraftAction(input: {
           input.title,
           input.contentHtml,
           slug,
+          input.featuredImage,
         )
       : await createShopifyDraft(
           shopifyConnection as ShopifyConnectionDocument,
           input.title,
           input.contentHtml,
           input.metaDescription,
+          input.featuredImage,
         );
 
     await db.collection<BlogProjectDocument>("blogProjects").updateOne(

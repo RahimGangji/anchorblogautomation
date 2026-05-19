@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { CreateImageForm } from "@/components/CreateImageForm";
 import { requireUser } from "@/lib/auth";
 import { getActiveAiSettings, getAiSettings } from "@/lib/aiSettings";
+import { imageModelForProvider } from "@/lib/aiModels";
 
 export default async function CreateImagePage() {
   const user = await requireUser();
@@ -37,7 +38,7 @@ export default async function CreateImagePage() {
 
         <div className="mt-6">
           <CreateImageForm
-            activeModel={settings?.model ?? ""}
+            activeModel={imageModelForProvider(settings?.provider, settings?.model)}
             activeProvider={settings ? settings.provider.toUpperCase() : "None"}
             canGenerate={canGenerate}
           />
