@@ -87,6 +87,14 @@ export default async function DashboardPage() {
                         View {project.draftProvider === "shopify" ? "Shopify" : "WordPress"} draft
                       </a>
                     ) : null}
+                    <Link
+                      href={`/create?projectId=${project._id?.toString()}`}
+                      prefetch
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <PenLine size={16} aria-hidden />
+                      Edit
+                    </Link>
                   </article>
                 ))}
               </div>

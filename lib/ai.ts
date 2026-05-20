@@ -243,10 +243,19 @@ function normalizeContentJson(json: unknown) {
 
   return {
     ...json,
+    contentHtml: stripAnchorTags((json as { contentHtml?: unknown }).contentHtml),
     slug: limitText((json as { slug?: unknown }).slug, 120),
     metaTitle: limitText((json as { metaTitle?: unknown }).metaTitle, 80),
     metaDescription: limitText((json as { metaDescription?: unknown }).metaDescription, 180),
   };
+}
+
+function stripAnchorTags(value: unknown) {
+  if (typeof value !== "string") return value;
+
+  return value
+    .replace(/<a\b[^>]*>/gi, "")
+    .replace(/<\/a>/gi, "");
 }
 
 type SeoBrief = {
@@ -306,13 +315,13 @@ export async function createContent(
   settings?: ActiveAiSettings | null,
 ) {
   const json = await completeJson(
-    "You write publish-ready blog articles. Return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. contentHtml must use semantic HTML tags such as h2, h3, p, ul, li, strong, and a where useful. Internal links must be valid <a href=\"...\">keyword phrase</a> tags, and the anchor text must be the relevant keyword phrase, not a bare URL. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
+    "You write publish-ready blog articles. Return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. contentHtml must use semantic HTML tags such as h2, h3, p, ul, li, and strong where useful. Do not add internal links, external links, or any <a> tags. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
     `${formatSeoBrief(brief)}
 
 Outline:
 ${JSON.stringify(outline, null, 2)}
 
-Write a polished blog post from this outline. Treat the primary keyword as the main target, weave in secondary keywords only where natural, and cover SEO entities with useful context instead of stuffing terms. When adding internal links, link the keyword phrase itself as the anchor text. Include a concise intro, actionable sections, and a natural conclusion. Generate a WordPress-ready slug, SEO meta title, and meta description within the character limits.`,
+Write a polished blog post from this outline. Treat the primary keyword as the main target, weave in secondary keywords only where natural, and cover SEO entities with useful context instead of stuffing terms. Do not add internal links, external links, or linked anchor tags. Include a concise intro, actionable sections, and a natural conclusion. Generate a WordPress-ready slug, SEO meta title, and meta description within the character limits.`,
     settings,
   );
 
@@ -333,7 +342,7 @@ export async function reviseContent(params: {
   settings?: ActiveAiSettings | null;
 }) {
   const json = await completeJson(
-    "You revise blog content based on user instructions. Preserve unchanged sections and return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. Preserve internal links as valid <a href=\"...\">keyword phrase</a> tags, and ensure the anchor text is the relevant keyword phrase, not a bare URL. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
+    "You revise blog content based on user instructions. Preserve unchanged sections and return only valid JSON with title, slug, contentHtml, metaTitle, and metaDescription. slug must be a lowercase URL slug with hyphens and no leading or trailing hyphen. Do not add or preserve internal links, external links, or any <a> tags. Convert existing linked text to plain text. metaTitle must be 80 characters or fewer. metaDescription must be 180 characters or fewer.",
     `${formatSeoBrief({
       keyword: params.keyword,
       secondaryKeywords: params.secondaryKeywords,
@@ -359,7 +368,7 @@ ${params.slug}
 Revision instruction:
 ${params.instruction}
 
-Keep the article aligned with the primary keyword, supporting secondary keywords, and SEO entities while following the revision instruction.`,
+Keep the article aligned with the primary keyword, supporting secondary keywords, and SEO entities while following the revision instruction. Do not add internal links, external links, or linked anchor tags. If existing content contains links, keep the visible anchor text but remove the link markup.`,
     params.settings,
   );
 

@@ -37,6 +37,7 @@ import {
   Trash2,
   Type,
   Undo2,
+  X,
 } from "lucide-react";
 import {
   analyzeContentAction,
@@ -46,12 +47,28 @@ import {
   publishDraftAction,
   refineContentAction,
   refineOutlineAction,
+  saveContentChangesAction,
 } from "@/app/actions";
 import type { BlogOutline } from "@/lib/types";
 import type { AiContentReport } from "@/lib/ai";
 import type { GeneratedImage, ImageSize } from "@/lib/imageAi";
 
 type Step = "brief" | "outline" | "content";
+type InitialProject = {
+  projectId: string;
+  keyword: string;
+  secondaryKeywords?: string;
+  seoEntities?: string;
+  prompt: string;
+  outline: BlogOutline;
+  title?: string;
+  contentHtml: string;
+  slug: string;
+  metaTitle: string;
+  metaDescription: string;
+  aiReport?: AiContentReport | null;
+  status: "outline" | "content" | "drafted";
+};
 type LinkEditState = {
   from: number;
   to: number;
@@ -205,29 +222,36 @@ export function BlogWorkflow({
   hasConnection,
   imageModel,
   imageProvider,
+  initialProject,
   connectedProvider,
 }: {
   canGenerateImage: boolean;
   hasConnection: boolean;
   imageModel: string;
   imageProvider: string;
+  initialProject?: InitialProject | null;
   connectedProvider?: string;
 }) {
-  const [step, setStep] = useState<Step>("brief");
-  const [keyword, setKeyword] = useState("");
-  const [secondaryKeywords, setSecondaryKeywords] = useState("");
-  const [seoEntities, setSeoEntities] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [outline, setOutline] = useState<BlogOutline>(emptyOutline);
+  const initialStep: Step = initialProject
+    ? initialProject.status === "outline"
+      ? "outline"
+      : "content"
+    : "brief";
+  const [step, setStep] = useState<Step>(initialStep);
+  const [keyword, setKeyword] = useState(initialProject?.keyword ?? "");
+  const [secondaryKeywords, setSecondaryKeywords] = useState(initialProject?.secondaryKeywords ?? "");
+  const [seoEntities, setSeoEntities] = useState(initialProject?.seoEntities ?? "");
+  const [prompt, setPrompt] = useState(initialProject?.prompt ?? "");
+  const [projectId, setProjectId] = useState(initialProject?.projectId ?? "");
+  const [outline, setOutline] = useState<BlogOutline>(initialProject?.outline ?? emptyOutline);
   const [outlineInstruction, setOutlineInstruction] = useState("");
   const [contentInstruction, setContentInstruction] = useState("");
-  const [title, setTitle] = useState("");
-  const [contentHtml, setContentHtml] = useState("");
-  const [slug, setSlug] = useState("");
-  const [metaTitle, setMetaTitle] = useState("");
-  const [metaDescription, setMetaDescription] = useState("");
-  const [aiReport, setAiReport] = useState<AiContentReport | null>(null);
+  const [title, setTitle] = useState(initialProject?.title || initialProject?.outline.title || "");
+  const [contentHtml, setContentHtml] = useState(initialProject?.contentHtml ?? "");
+  const [slug, setSlug] = useState(initialProject?.slug ?? "");
+  const [metaTitle, setMetaTitle] = useState(initialProject?.metaTitle ?? "");
+  const [metaDescription, setMetaDescription] = useState(initialProject?.metaDescription ?? "");
+  const [aiReport, setAiReport] = useState<AiContentReport | null>(initialProject?.aiReport ?? null);
   const [linkEdit, setLinkEdit] = useState<LinkEditState | null>(null);
   const [linkEditKeyword, setLinkEditKeyword] = useState("");
   const [linkEditHref, setLinkEditHref] = useState("");
@@ -439,6 +463,27 @@ export function BlogWorkflow({
     );
   }
 
+  function saveContentChanges() {
+    runAction(
+      async () => {
+        const result = await saveContentChangesAction({
+          projectId,
+          title,
+          outline,
+          contentHtml,
+          slug,
+          metaTitle,
+          metaDescription,
+        });
+        if (!result.ok) throw new Error(result.error);
+        return result.data;
+      },
+      () => {
+        toast.success("Changes saved.");
+      },
+    );
+  }
+
   function updateSection(index: number, patch: Partial<BlogOutline["sections"][number]>) {
     setOutline((current) => ({
       ...current,
@@ -547,83 +592,94 @@ export function BlogWorkflow({
   }
 
   return (
-    <div className="grid min-w-0 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-      <aside className="min-w-0 space-y-3">
-        <StepButton active={step === "brief"} icon={<Sparkles size={18} />} label="Brief" />
-        <StepButton active={step === "outline"} icon={<ListPlus size={18} />} label="Outline" />
-        <StepButton active={step === "content"} icon={<FileText size={18} />} label="Content" />
-        {!hasConnection ? (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-            Connect WordPress or Shopify before publishing a draft.
-          </p>
-        ) : null}
-        {step === "content" ? (
-          <AiSeoReportPanel
-            report={aiReport}
-            isPending={isPending}
-            onRefresh={refreshAiReport}
-          />
-        ) : null}
-      </aside>
+    <div className="min-w-0 space-y-5">
+      <StepProgress step={step} />
+
+      {!hasConnection ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+          Connect WordPress or Shopify before publishing a draft.
+        </p>
+      ) : null}
+
+      {step === "content" ? (
+        <AiSeoReportPanel report={aiReport} isPending={isPending} onRefresh={refreshAiReport} />
+      ) : null}
 
       <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         {step === "brief" ? (
-          <div className="space-y-5">
-            <div>
-              <h1 className="text-2xl font-semibold text-slate-950">Create a blog brief</h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Give the AI a primary keyword, supporting SEO context, and direction. It will
-                return a structured outline you can edit before content generation.
-              </p>
+          <div className="space-y-6">
+            <div className="-mx-4 -mt-4 border-b border-slate-800 bg-slate-950 px-4 py-5 text-white sm:-mx-6 sm:-mt-6 sm:px-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-200">
+                    Step 1
+                  </p>
+                  <h1 className="mt-2 text-2xl font-bold">Create a blog brief</h1>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                    Add the SEO context here, then use the sticky prompt below to guide the tone,
+                    audience, and angle for the outline.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-semibold text-slate-300 sm:w-72">
+                  <span className="rounded-md bg-white/10 px-2 py-2">Keyword</span>
+                  <span className="rounded-md bg-white/10 px-2 py-2">SEO</span>
+                  <span className="rounded-md bg-white/10 px-2 py-2">Prompt</span>
+                </div>
+              </div>
             </div>
-            <label className="block">
-              <span className="text-sm font-medium text-slate-700">Primary keyword</span>
+
+            <div className="grid gap-4 md:grid-cols-2">
+            <label className="block md:col-span-2">
+              <span className="text-sm font-semibold text-slate-800">
+                Primary keyword
+                <span className="ml-1 text-red-600">*</span>
+              </span>
               <input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
                 placeholder="blog automation for WordPress"
-                className="mt-2 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-slate-950 focus:bg-white"
               />
+              <p className="mt-2 text-xs italic leading-5 text-slate-500">
+                Use the main phrase this article should rank for.
+              </p>
             </label>
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">Secondary keywords</span>
+              <span className="text-sm font-semibold text-slate-800">Secondary keywords</span>
               <textarea
                 value={secondaryKeywords}
                 onChange={(event) => setSecondaryKeywords(event.target.value)}
                 rows={3}
                 placeholder="AI blog writer, WordPress content automation, SEO blog workflow"
-                className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
+                className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none focus:border-slate-950 focus:bg-white"
               />
             </label>
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">SEO entities</span>
+              <span className="text-sm font-semibold text-slate-800">SEO entities</span>
               <textarea
                 value={seoEntities}
                 onChange={(event) => setSeoEntities(event.target.value)}
                 rows={3}
                 placeholder="WordPress, CMS drafts, editorial calendar, meta description, internal links"
-                className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
+                className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none focus:border-slate-950 focus:bg-white"
               />
             </label>
-            <label className="block">
-              <span className="text-sm font-medium text-slate-700">Prompt</span>
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                rows={6}
-                placeholder="Write for small business owners who want to publish SEO blogs faster."
-                className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={generateOutline}
-              disabled={isPending}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-            >
-              {isPending ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-              Generate outline
-            </button>
+            </div>
+            {isPending ? (
+              <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-4">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-white">
+                  <Sparkles size={17} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-950">Creating your outline</p>
+                  <div className="mt-2 flex items-center gap-1.5" aria-label="Generating outline">
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.2s]" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.1s]" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -636,39 +692,61 @@ export function BlogWorkflow({
                   Adjust the structure manually or ask AI to revise specific parts.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={generateContent}
-                disabled={isPending || !canGenerateContent}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-              >
-                <ArrowRight size={18} />
-                Next
-              </button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOutline((current) => ({
+                      ...current,
+                      sections: [
+                        ...current.sections,
+                        { heading: "New section", bullets: ["Key point"] },
+                      ],
+                    }))
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <ListPlus size={18} />
+                  Add section
+                </button>
+                <button
+                  type="button"
+                  onClick={generateContent}
+                  disabled={isPending || !canGenerateContent}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                >
+                  <ArrowRight size={18} />
+                  Next
+                </button>
+              </div>
             </div>
 
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">Title</span>
+              <span className="text-sm font-bold text-slate-950">Title</span>
               <input
                 value={outline.title}
                 onChange={(event) =>
                   setOutline((current) => ({ ...current, title: event.target.value }))
                 }
-                className="mt-2 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
+                placeholder="Enter blog title"
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none placeholder:font-bold focus:border-slate-950 focus:bg-white"
               />
             </label>
 
             <div className="space-y-4">
               {outline.sections.map((section, sectionIndex) => (
-                <div key={sectionIndex} className="rounded-lg border border-slate-200 p-4">
+                <div
+                  key={sectionIndex}
+                  className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                >
                   <div className="flex gap-3">
-                    <Heading2 className="mt-3 shrink-0 text-slate-400" size={18} />
+                    <Heading2 className="mt-3 shrink-0 text-slate-950" size={18} />
                     <input
                       value={section.heading}
                       onChange={(event) =>
                         updateSection(sectionIndex, { heading: event.target.value })
                       }
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-950"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-950 outline-none focus:border-slate-950"
                     />
                     <button
                       type="button"
@@ -678,7 +756,7 @@ export function BlogWorkflow({
                           sections: current.sections.filter((_, index) => index !== sectionIndex),
                         }))
                       }
-                      className="rounded-lg px-3 text-slate-500 hover:bg-slate-100"
+                      className="rounded-lg px-3 text-red-600 hover:bg-red-50"
                       title="Remove section"
                     >
                       <Trash2 size={17} />
@@ -695,47 +773,12 @@ export function BlogWorkflow({
                       })
                     }
                     rows={4}
-                    className="mt-3 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-slate-950"
+                    className="mt-3 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-slate-950"
                   />
                 </div>
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={() =>
-                setOutline((current) => ({
-                  ...current,
-                  sections: [...current.sections, { heading: "New section", bullets: ["Key point"] }],
-                }))
-              }
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <ListPlus size={18} />
-              Add section
-            </button>
-
-            <div className="rounded-lg bg-slate-50 p-4">
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700">Ask AI to revise outline</span>
-                <textarea
-                  value={outlineInstruction}
-                  onChange={(event) => setOutlineInstruction(event.target.value)}
-                  rows={3}
-                  placeholder="Add a comparison section and make the conclusion more actionable."
-                  className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-950"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={refineOutline}
-                disabled={isPending || !outlineInstruction.trim()}
-                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-              >
-                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                Revise outline
-              </button>
-            </div>
           </div>
         ) : null}
 
@@ -749,7 +792,7 @@ export function BlogWorkflow({
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Meta title</span>
+                <span className="text-sm font-bold text-slate-950">Meta title</span>
                 <input
                   value={metaTitle}
                   onChange={(event) => setMetaTitle(event.target.value)}
@@ -757,7 +800,7 @@ export function BlogWorkflow({
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Slug</span>
+                <span className="text-sm font-bold text-slate-950">Slug</span>
                 <input
                   value={slug}
                   onChange={(event) => setSlug(event.target.value)}
@@ -767,7 +810,7 @@ export function BlogWorkflow({
               </label>
             </div>
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">Meta description</span>
+              <span className="text-sm font-bold text-slate-950">Meta description</span>
               <textarea
                 value={metaDescription}
                 onChange={(event) => setMetaDescription(event.target.value)}
@@ -776,7 +819,7 @@ export function BlogWorkflow({
               />
             </label>
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">Post title</span>
+              <span className="text-sm font-bold text-slate-950">Post title</span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
@@ -859,127 +902,196 @@ export function BlogWorkflow({
               ) : null}
             </div>
             <EditorContent editor={editor} />
-            <div className="rounded-lg bg-slate-50 p-4">
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700">Ask AI to revise content</span>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={saveContentChanges}
+                disabled={isPending || !projectId}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                Save Changes
+              </button>
+              <button
+                type="button"
+                onClick={publishDraft}
+                disabled={isPending || !hasConnection}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
+              >
+                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                Draft to {connectedProvider || "CMS"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsImageCreatorOpen(true)}
+                disabled={isPending || !canGenerateImage}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+              >
+                <ImagePlus size={18} />
+                Create blog image
+              </button>
+            </div>
+            <label className="block">
+              <span className="sr-only">Ask AI to revise content</span>
+              <div className="flex items-end gap-3 rounded-lg border border-slate-950 bg-white p-2 shadow-[0_12px_35px_rgba(15,23,42,0.18)]">
                 <textarea
                   value={contentInstruction}
                   onChange={(event) => setContentInstruction(event.target.value)}
                   rows={3}
-                  placeholder="Make the intro shorter and add more practical examples."
-                  className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-950"
+                  placeholder="Ask AI to revise content..."
+                  className="min-h-20 flex-1 resize-none rounded-md border border-transparent bg-white px-3 py-2 text-sm leading-6 outline-none"
                 />
-              </label>
-              <button
-                type="button"
-                onClick={refineContent}
-                disabled={isPending || !contentInstruction.trim()}
-                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-              >
-                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                Revise content
-              </button>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h2 className="text-base font-semibold text-slate-950">Create blog image</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">
-                    Generate an image with your active API provider and insert it after a section.
-                  </p>
-                  <p className="mt-2 text-xs font-medium text-slate-500">
-                    Active image model: {imageProvider ? imageProvider.toUpperCase() : "None"}
-                    {imageModel ? ` / ${imageModel}` : ""}
-                  </p>
-                </div>
                 <button
                   type="button"
-                  onClick={() => setIsImageCreatorOpen((current) => !current)}
-                  disabled={isPending || !canGenerateImage}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                  onClick={refineContent}
+                  disabled={isPending || !contentInstruction.trim()}
+                  aria-label="Revise content"
+                  title="Revise content"
+                  className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"
                 >
-                  <ImagePlus size={18} />
-                  Create image
+                  {isPending ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
               </div>
-
-              {!canGenerateImage ? (
-                <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
-                  Select and save a GPT or Gemini API key in API Keys to create images.
-                </p>
-              ) : null}
-
-              {isImageCreatorOpen ? (
-                <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 md:grid-cols-2">
-                  <label className="block md:col-span-2">
-                    <span className="text-sm font-medium text-slate-700">Image prompt</span>
-                    <textarea
-                      value={imagePrompt}
-                      onChange={(event) => setImagePrompt(event.target.value)}
-                      rows={4}
-                      placeholder="Create a realistic blog image that visualizes the main idea of this section."
-                      className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-slate-950"
-                    />
-                  </label>
-                  <label className="block min-w-0">
-                    <span className="text-sm font-medium text-slate-700">Image size</span>
-                    <select
-                      value={imageSize}
-                      onChange={(event) => setImageSize(event.target.value as ImageSize)}
-                      className="mt-2 w-full min-w-0 truncate rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
-                    >
-                      <option value="1024x1024">Square 1024 x 1024</option>
-                      <option value="1536x1024">Landscape 1536 x 1024</option>
-                      <option value="1024x1536">Portrait 1024 x 1536</option>
-                    </select>
-                  </label>
-                  <label className="block min-w-0">
-                    <span className="text-sm font-medium text-slate-700">Add after section</span>
-                    <select
-                      value={imageSectionIndex}
-                      onChange={(event) => setImageSectionIndex(Number(event.target.value))}
-                      className="mt-2 w-full min-w-0 truncate rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
-                    >
-                      {outline.sections.map((section, index) => (
-                        <option key={`${section.heading}-${index}`} value={index}>
-                          {section.heading}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="flex flex-col gap-2 sm:flex-row md:col-span-2">
-                    <button
-                      type="button"
-                      onClick={createAndInsertImage}
-                      disabled={isPending || !imagePrompt.trim() || outline.sections.length === 0}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
-                    >
-                      {isPending ? <Loader2 className="animate-spin" size={18} /> : <ImagePlus size={18} />}
-                      {isPending ? "Creating..." : "Create and insert image"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsImageCreatorOpen(false)}
-                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={publishDraft}
-              disabled={isPending || !hasConnection}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
-            >
-              {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-              Draft to {connectedProvider || "CMS"}
-            </button>
+            </label>
           </div>
         ) : null}
       </section>
+      {step === "brief" ? (
+        <div className="mx-auto w-full max-w-[calc(72rem-3rem)]">
+            <label className="block">
+              <span className="sr-only">Prompt</span>
+              <div className="flex items-end gap-3 rounded-lg border border-slate-950 bg-white p-2 shadow-[0_12px_35px_rgba(15,23,42,0.18)]">
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  rows={3}
+                  placeholder="Write for small business owners who want to publish SEO blogs faster."
+                  className="min-h-20 flex-1 resize-none rounded-md border border-transparent bg-white px-3 py-2 text-sm leading-6 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={generateOutline}
+                  disabled={isPending}
+                  aria-label="Generate outline"
+                  title="Generate outline"
+                  className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"
+                >
+                  {isPending ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
+                </button>
+              </div>
+            </label>
+        </div>
+      ) : null}
+      {step === "outline" ? (
+        <div className="mx-auto w-full max-w-[calc(72rem-3rem)]">
+            <label className="block">
+              <span className="sr-only">Ask AI to revise outline</span>
+              <div className="flex items-end gap-3 rounded-lg border border-slate-950 bg-white p-2 shadow-[0_12px_35px_rgba(15,23,42,0.18)]">
+                <textarea
+                  value={outlineInstruction}
+                  onChange={(event) => setOutlineInstruction(event.target.value)}
+                  rows={3}
+                  placeholder="Ask AI to revise outline..."
+                  className="min-h-20 flex-1 resize-none rounded-md border border-transparent bg-white px-3 py-2 text-sm leading-6 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={refineOutline}
+                  disabled={isPending || !outlineInstruction.trim()}
+                  aria-label="Revise outline"
+                  title="Revise outline"
+                  className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"
+                >
+                  {isPending ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
+                </button>
+              </div>
+            </label>
+        </div>
+      ) : null}
+      {isImageCreatorOpen ? (
+        <div className="fixed inset-0 z-50">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/40"
+            aria-label="Close image creator"
+            onClick={() => setIsImageCreatorOpen(false)}
+          />
+          <aside className="absolute right-0 top-0 flex h-full w-[min(30rem,92vw)] flex-col border-l border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  Blog image
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-slate-950">Create blog image</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Generate an image and insert it after a selected section.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsImageCreatorOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
+                aria-label="Close image creator"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+                Active image model: {imageProvider ? imageProvider.toUpperCase() : "None"}
+                {imageModel ? ` / ${imageModel}` : ""}
+              </p>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Image prompt</span>
+                <textarea
+                  value={imagePrompt}
+                  onChange={(event) => setImagePrompt(event.target.value)}
+                  rows={5}
+                  placeholder="Create a realistic blog image that visualizes the main idea of this section."
+                  className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-slate-950"
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="text-sm font-medium text-slate-700">Image size</span>
+                <select
+                  value={imageSize}
+                  onChange={(event) => setImageSize(event.target.value as ImageSize)}
+                  className="mt-2 w-full min-w-0 truncate rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
+                >
+                  <option value="1024x1024">Square 1024 x 1024</option>
+                  <option value="1536x1024">Landscape 1536 x 1024</option>
+                  <option value="1024x1536">Portrait 1024 x 1536</option>
+                </select>
+              </label>
+              <label className="block min-w-0">
+                <span className="text-sm font-medium text-slate-700">Add after section</span>
+                <select
+                  value={imageSectionIndex}
+                  onChange={(event) => setImageSectionIndex(Number(event.target.value))}
+                  className="mt-2 w-full min-w-0 truncate rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-slate-950"
+                >
+                  {outline.sections.map((section, index) => (
+                    <option key={`${section.heading}-${index}`} value={index}>
+                      {section.heading}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="border-t border-slate-200 p-5">
+              <button
+                type="button"
+                onClick={createAndInsertImage}
+                disabled={isPending || !imagePrompt.trim() || outline.sections.length === 0}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
+              >
+                {isPending ? <Loader2 className="animate-spin" size={18} /> : <ImagePlus size={18} />}
+                {isPending ? "Creating..." : "Create and insert image"}
+              </button>
+            </div>
+          </aside>
+        </div>
+      ) : null}
       {linkEdit ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
           <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
@@ -1044,25 +1156,80 @@ export function BlogWorkflow({
   );
 }
 
+function StepProgress({ step }: { step: Step }) {
+  const activeLineClass =
+    step === "brief" ? "w-0" : step === "outline" ? "w-1/2" : "w-full";
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="relative">
+        <div className="absolute left-[16.666%] right-[16.666%] top-5 h-1 rounded-full bg-slate-200">
+          <div
+            className={`h-full rounded-full bg-slate-950 transition-all duration-300 ${activeLineClass}`}
+          />
+        </div>
+        <div className="relative grid grid-cols-3 gap-2">
+          <StepButton
+            active={step === "brief"}
+            completed={step !== "brief"}
+            icon={<Sparkles size={17} />}
+            label="Brief"
+            number={1}
+          />
+          <StepButton
+            active={step === "outline"}
+            completed={step === "content"}
+            icon={<ListPlus size={17} />}
+            label="Outline"
+            number={2}
+          />
+          <StepButton
+            active={step === "content"}
+            completed={false}
+            icon={<FileText size={17} />}
+            label="Content"
+            number={3}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StepButton({
   active,
+  completed,
   icon,
   label,
+  number,
 }: {
   active: boolean;
+  completed: boolean;
   icon: ReactNode;
   label: string;
+  number: number;
 }) {
   return (
-    <div
-      className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-semibold ${
-        active
-          ? "border-slate-950 bg-slate-950 text-white"
-          : "border-slate-200 bg-white text-slate-600"
-      }`}
-    >
-      {icon}
-      {label}
+    <div className="flex min-w-0 flex-col items-center gap-2 text-center">
+      <span
+        className={`z-10 flex h-11 w-11 items-center justify-center rounded-full border-4 text-sm font-bold transition ${
+          active
+            ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+            : completed
+              ? "border-slate-950 bg-white text-slate-950"
+              : "border-slate-200 bg-white text-slate-500"
+        }`}
+      >
+        {number}
+      </span>
+      <span
+        className={`inline-flex max-w-full items-center gap-1.5 truncate text-sm font-semibold ${
+          active ? "text-slate-950" : completed ? "text-slate-700" : "text-slate-500"
+        }`}
+      >
+        {icon}
+        {label}
+      </span>
     </div>
   );
 }
@@ -1237,6 +1404,11 @@ function AiSeoReportPanel({
   onRefresh: () => void;
   report: AiContentReport | null;
 }) {
+  const [isReportDrawerOpen, setIsReportDrawerOpen] = useState(false);
+  const seoErrorCount = report?.seoAnalysis.filter((issue) => issue.severity === "error").length ?? 0;
+  const readabilityErrorCount =
+    report?.readabilityAnalysis.filter((issue) => issue.severity === "error").length ?? 0;
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center gap-2">
@@ -1245,30 +1417,70 @@ function AiSeoReportPanel({
       </div>
       {report ? (
         <div className="mt-4 space-y-4">
-          <ScoreCard label="SEO" score={report.seoScore} />
-          <ScoreCard label="Readability" score={report.readabilityScore} />
-          <p className="text-sm leading-6 text-slate-600">{report.summary}</p>
-          <IssueSummary
-            label="SEO errors"
-            count={report.seoAnalysis.filter((issue) => issue.severity === "error").length}
-          />
-          <IssueSummary
-            label="Readability errors"
-            count={report.readabilityAnalysis.filter((issue) => issue.severity === "error").length}
-          />
-          <div className="space-y-3 border-t border-slate-100 pt-4">
-            <ReportIssueList title="SEO issues" issues={report.seoAnalysis} />
-            <ReportIssueList title="Readability issues" issues={report.readabilityAnalysis} />
+          <div className="grid grid-cols-2 gap-3">
+            <ScoreCard label="SEO" score={report.seoScore} />
+            <ScoreCard label="Readability" score={report.readabilityScore} />
           </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={isPending}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            {isPending ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
-            Update AI check
-          </button>
+          <p className="text-sm leading-6 text-slate-600">{report.summary}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <IssueSummary label="SEO errors" count={seoErrorCount} />
+            <IssueSummary label="Readability errors" count={readabilityErrorCount} />
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => setIsReportDrawerOpen(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              <BarChart3 size={17} />
+              View Full Report
+            </button>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isPending}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {isPending ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
+              Update AI check
+            </button>
+          </div>
+          {isReportDrawerOpen ? (
+            <div className="fixed inset-0 z-50">
+              <button
+                type="button"
+                className="absolute inset-0 bg-slate-950/40"
+                aria-label="Close full report"
+                onClick={() => setIsReportDrawerOpen(false)}
+              />
+              <aside className="absolute right-0 top-0 flex h-full w-[min(30rem,92vw)] flex-col border-l border-slate-200 bg-white shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      AI SEO report
+                    </p>
+                    <h2 className="mt-1 text-lg font-semibold text-slate-950">Full report</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsReportDrawerOpen(false)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
+                    aria-label="Close full report"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+                  <div className="grid grid-cols-2 gap-3">
+                    <ScoreCard label="SEO" score={report.seoScore} />
+                    <ScoreCard label="Readability" score={report.readabilityScore} />
+                  </div>
+                  <ReportIssueList title="SEO issues" issues={report.seoAnalysis} />
+                  <ReportIssueList title="Readability issues" issues={report.readabilityAnalysis} />
+                </div>
+              </aside>
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="mt-3 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm leading-6 text-slate-600">
@@ -1318,34 +1530,37 @@ function ReportIssueList({
 
 function ScoreCard({ label, score }: { label: string; score: number }) {
   const rating = score >= 70 ? "good" : score >= 50 ? "ok" : "bad";
+  const color = rating === "good" ? "#10b981" : rating === "ok" ? "#f59e0b" : "#f43f5e";
+  const safeScore = Math.min(Math.max(score, 0), 100);
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <div className="mt-2 flex items-center gap-3">
-        <span className={`h-3 w-3 rounded-full ${ratingClass(rating)}`} />
-        <span className="text-2xl font-semibold text-slate-950">{score}</span>
-        <span className="text-sm text-slate-600">/ 100</span>
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-center">
+      <div
+        className="mx-auto flex h-20 w-20 items-center justify-center rounded-full"
+        style={{
+          background: `conic-gradient(${color} ${safeScore * 3.6}deg, #e2e8f0 0deg)`,
+        }}
+      >
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white">
+          <span className="text-xl font-bold text-slate-950">{score}</span>
+        </div>
       </div>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+        {label}
+      </p>
     </div>
   );
 }
 
 function IssueSummary({ count, label }: { count: number; label: string }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm">
+    <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
       <span className="text-slate-600">{label}</span>
       <span className={count > 0 ? "font-semibold text-rose-600" : "font-semibold text-emerald-600"}>
         {count}
       </span>
     </div>
   );
-}
-
-function ratingClass(rating: "good" | "ok" | "bad") {
-  if (rating === "good") return "bg-emerald-500";
-  if (rating === "ok") return "bg-amber-500";
-  return "bg-rose-500";
 }
 
 function issueCardClass(severity: AiContentReport["seoAnalysis"][number]["severity"]) {

@@ -566,10 +566,12 @@ export async function generateContentAction(input: {
       {
         $set: {
           outline,
+          title: content.title,
           contentHtml: content.contentHtml,
           slug: content.slug,
           metaTitle: content.metaTitle,
           metaDescription: content.metaDescription,
+          aiReport,
           status: "content",
           updatedAt: new Date(),
         },
@@ -658,10 +660,12 @@ export async function refineContentAction(input: {
       {
         $set: {
           outline,
+          title: content.title,
           contentHtml: content.contentHtml,
           slug: content.slug,
           metaTitle: content.metaTitle,
           metaDescription: content.metaDescription,
+          aiReport,
           status: "content",
           updatedAt: new Date(),
         },
@@ -669,6 +673,55 @@ export async function refineContentAction(input: {
     );
 
     return { ok: true, data: { ...content, aiReport } };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function saveContentChangesAction(input: {
+  projectId: string;
+  title: string;
+  outline: BlogOutline;
+  contentHtml: string;
+  slug: string;
+  metaTitle: string;
+  metaDescription: string;
+}): Promise<ActionResult<{ saved: true }>> {
+  try {
+    const session = await requireSession();
+
+    if (!ObjectId.isValid(input.projectId)) {
+      throw new Error("Invalid project.");
+    }
+
+    const outline = outlineSchema.parse(input.outline);
+    const slug = input.slug.trim() ? slugSchema.parse(input.slug) : "";
+    const now = new Date();
+    const db = await getDb();
+    const result = await db.collection<BlogProjectDocument>("blogProjects").updateOne(
+      { _id: new ObjectId(input.projectId), userId: session.objectUserId },
+      {
+        $set: {
+          outline,
+          title: input.title.trim(),
+          contentHtml: input.contentHtml,
+          slug,
+          metaTitle: input.metaTitle.trim(),
+          metaDescription: input.metaDescription.trim(),
+          status: "content",
+          updatedAt: now,
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      throw new Error("Project not found.");
+    }
+
+    revalidatePath("/dashboard");
+    revalidatePath("/create");
+
+    return { ok: true, data: { saved: true } };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
@@ -719,6 +772,21 @@ export async function analyzeContentAction(input: {
         metaDescription: input.metaDescription,
       },
       settings,
+    );
+
+    await db.collection<BlogProjectDocument>("blogProjects").updateOne(
+      { _id: project._id, userId: session.objectUserId },
+      {
+        $set: {
+          title: input.title.trim(),
+          contentHtml: input.contentHtml,
+          slug: input.slug,
+          metaTitle: input.metaTitle,
+          metaDescription: input.metaDescription,
+          aiReport: report,
+          updatedAt: new Date(),
+        },
+      },
     );
 
     return { ok: true, data: report };
@@ -804,6 +872,7 @@ export async function publishDraftAction(input: {
       {
         $set: {
           outline: outlineSchema.parse(input.outline),
+          title: input.title,
           contentHtml: input.contentHtml,
           slug,
           metaTitle: input.metaTitle,

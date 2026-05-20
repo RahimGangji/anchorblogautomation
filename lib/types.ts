@@ -64,6 +64,21 @@ export type BlogOutline = {
   sections: OutlineSection[];
 };
 
+export type AiContentIssue = {
+  severity: "good" | "warning" | "error";
+  location: string;
+  issue: string;
+  recommendation: string;
+};
+
+export type AiContentReportDocument = {
+  seoScore: number;
+  readabilityScore: number;
+  summary: string;
+  seoAnalysis: AiContentIssue[];
+  readabilityAnalysis: AiContentIssue[];
+};
+
 export type BlogProjectDocument = {
   _id?: ObjectId;
   userId: ObjectId;
@@ -72,10 +87,12 @@ export type BlogProjectDocument = {
   seoEntities?: string;
   prompt: string;
   outline: BlogOutline;
+  title?: string;
   contentHtml: string;
   slug: string;
   metaTitle: string;
   metaDescription: string;
+  aiReport?: AiContentReportDocument;
   status: "outline" | "content" | "drafted";
   draftProvider?: "wordpress" | "shopify";
   cmsDraftId?: string;
