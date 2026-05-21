@@ -28,6 +28,7 @@ export type WordPressConnectionDocument = {
   _id?: ObjectId;
   userId: ObjectId;
   siteUrl: string;
+  websiteContext?: string;
   /** Legacy JWT / plugin Bearer token (still honored if set). */
   token?: string;
   /** WordPress username for Application Password (HTTP Basic) auth. */
@@ -44,6 +45,7 @@ export type ShopifyConnectionDocument = {
   _id?: ObjectId;
   userId: ObjectId;
   shopDomain: string;
+  websiteContext?: string;
   accessToken: string;
   blogId: string;
   blogTitle: string;
@@ -86,6 +88,9 @@ export type BlogProjectDocument = {
   secondaryKeywords?: string;
   seoEntities?: string;
   prompt: string;
+  cmsProvider?: "wordpress" | "shopify";
+  cmsConnectionId?: ObjectId;
+  websiteContext?: string;
   outline: BlogOutline;
   title?: string;
   contentHtml: string;

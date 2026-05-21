@@ -14,6 +14,7 @@ export const loginSchema = z.object({
 
 export const wordpressConnectionSchema = z.object({
   siteUrl: z.string().trim().url("Enter a valid WordPress site URL."),
+  websiteContext: z.string().trim().max(1200, "Website context must be 1200 characters or fewer.").optional().default(""),
   wpUsername: z.string().trim().min(1, "Enter your WordPress username."),
   wpApplicationPassword: z
     .string()
@@ -40,6 +41,7 @@ export const shopifyConnectionSchema = z.object({
       message: "Enter a valid Shopify domain, like your-store.myshopify.com.",
     }),
   accessToken: z.string().trim().min(20, "Enter your Shopify Admin API access token."),
+  websiteContext: z.string().trim().max(1200, "Website context must be 1200 characters or fewer.").optional().default(""),
   blogId: z
     .string()
     .trim()
@@ -102,6 +104,10 @@ export const aiContentReportSchema = z.object({
 });
 
 export const createOutlineSchema = z.object({
+  cmsProvider: z.enum(["wordpress", "shopify"], {
+    message: "Choose the CMS project for this blog.",
+  }),
+  cmsConnectionId: z.string().trim().min(1, "Choose the CMS project for this blog."),
   keyword: z.string().trim().min(2, "Keyword is required."),
   secondaryKeywords: z.string().trim().optional().default(""),
   seoEntities: z.string().trim().optional().default(""),

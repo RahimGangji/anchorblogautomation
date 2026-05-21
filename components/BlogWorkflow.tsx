@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ReactNode } from "react";
 import Image from "next/image";
-import { Mark, Node, mergeAttributes } from "@tiptap/core";
+import { Mark, Node as TiptapNode, mergeAttributes } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -14,6 +14,7 @@ import {
   ArrowRight,
   BarChart3,
   Bold,
+  ChevronDown,
   FileText,
   Heading1,
   Heading2,
@@ -60,6 +61,9 @@ type InitialProject = {
   secondaryKeywords?: string;
   seoEntities?: string;
   prompt: string;
+  cmsProvider?: "wordpress" | "shopify";
+  cmsConnectionId?: string;
+  websiteContext?: string;
   outline: BlogOutline;
   title?: string;
   contentHtml: string;
@@ -75,6 +79,12 @@ type LinkEditState = {
   keyword: string;
   href: string;
   mode?: "edit" | "insert";
+};
+type CmsConnectionOption = {
+  id: string;
+  provider: "wordpress" | "shopify";
+  label: string;
+  websiteContext?: string;
 };
 
 const emptyOutline: BlogOutline = {
@@ -167,7 +177,7 @@ const LinkMark = Mark.create({
   },
 });
 
-const ImageNode = Node.create({
+const ImageNode = TiptapNode.create({
   name: "image",
   group: "block",
   atom: true,
@@ -224,6 +234,7 @@ export function BlogWorkflow({
   imageProvider,
   initialProject,
   connectedProvider,
+  cmsConnections,
 }: {
   canGenerateImage: boolean;
   hasConnection: boolean;
@@ -231,6 +242,7 @@ export function BlogWorkflow({
   imageProvider: string;
   initialProject?: InitialProject | null;
   connectedProvider?: string;
+  cmsConnections: CmsConnectionOption[];
 }) {
   const initialStep: Step = initialProject
     ? initialProject.status === "outline"
@@ -242,6 +254,12 @@ export function BlogWorkflow({
   const [secondaryKeywords, setSecondaryKeywords] = useState(initialProject?.secondaryKeywords ?? "");
   const [seoEntities, setSeoEntities] = useState(initialProject?.seoEntities ?? "");
   const [prompt, setPrompt] = useState(initialProject?.prompt ?? "");
+  const [cmsProvider, setCmsProvider] = useState<"wordpress" | "shopify" | "">(
+    initialProject?.cmsProvider ?? cmsConnections[0]?.provider ?? "",
+  );
+  const [cmsConnectionId, setCmsConnectionId] = useState(
+    initialProject?.cmsConnectionId ?? cmsConnections[0]?.id ?? "",
+  );
   const [projectId, setProjectId] = useState(initialProject?.projectId ?? "");
   const [outline, setOutline] = useState<BlogOutline>(initialProject?.outline ?? emptyOutline);
   const [outlineInstruction, setOutlineInstruction] = useState("");
@@ -264,7 +282,9 @@ export function BlogWorkflow({
     fileName: string;
     mimeType: string;
   } | null>(null);
+  const [isCmsDropdownOpen, setIsCmsDropdownOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const cmsDropdownRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const featuredImageInputRef = useRef<HTMLInputElement>(null);
 
@@ -303,10 +323,35 @@ export function BlogWorkflow({
     return () => window.removeEventListener("anchorblog:edit-link", openLinkEdit);
   }, []);
 
+  useEffect(() => {
+    function closeCmsDropdown(event: MouseEvent) {
+      if (!cmsDropdownRef.current?.contains(event.target as Node)) {
+        setIsCmsDropdownOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeCmsDropdown);
+    return () => document.removeEventListener("mousedown", closeCmsDropdown);
+  }, []);
+
   const canGenerateContent = useMemo(
     () => projectId && outline.title.trim() && outline.sections.length > 0,
     [outline, projectId],
   );
+  const selectedCmsConnection = cmsConnections.find(
+    (connection) => connection.id === cmsConnectionId && connection.provider === cmsProvider,
+  );
+  const selectedCmsProviderLabel = selectedCmsConnection
+    ? selectedCmsConnection.provider === "wordpress"
+      ? "WordPress"
+      : "Shopify"
+    : connectedProvider || "CMS";
+
+  function chooseCmsConnection(connection: CmsConnectionOption) {
+    setCmsProvider(connection.provider);
+    setCmsConnectionId(connection.id);
+    setIsCmsDropdownOpen(false);
+  }
 
   function closeLinkEditModal() {
     setLinkEdit(null);
@@ -351,6 +396,8 @@ export function BlogWorkflow({
     runAction(
       async () => {
         const result = await generateOutlineAction({
+          cmsProvider: cmsProvider || "wordpress",
+          cmsConnectionId,
           keyword,
           secondaryKeywords,
           seoEntities,
@@ -456,8 +503,8 @@ export function BlogWorkflow({
       (data) => {
         toast.success(
           data.draftLink
-            ? `Draft created in ${connectedProvider || data.provider}: ${data.draftLink}`
-            : `Draft created in ${connectedProvider || data.provider} with ID ${data.draftId}.`,
+            ? `Draft created in ${selectedCmsConnection?.label || connectedProvider || data.provider}: ${data.draftLink}`
+            : `Draft created in ${selectedCmsConnection?.label || connectedProvider || data.provider} with ID ${data.draftId}.`,
         );
       },
     );
@@ -628,6 +675,79 @@ export function BlogWorkflow({
               </div>
             </div>
 
+            <div className="block">
+              <span className="block text-sm font-semibold text-slate-800">
+                CMS project
+                <span className="ml-1 text-red-600">*</span>
+              </span>
+              <div ref={cmsDropdownRef} className="relative mt-2 w-full max-w-xl sm:w-[32rem]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!initialProject) {
+                      setIsCmsDropdownOpen((current) => !current);
+                    }
+                  }}
+                  disabled={Boolean(initialProject)}
+                  aria-haspopup="listbox"
+                  aria-expanded={isCmsDropdownOpen}
+                  className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-semibold text-slate-800 outline-none transition hover:bg-white focus:border-slate-950 disabled:cursor-not-allowed disabled:text-slate-500"
+                >
+                  <span className="min-w-0 truncate">
+                    {selectedCmsConnection?.label || "Choose where this blog will be drafted"}
+                  </span>
+                  <ChevronDown
+                    size={17}
+                    aria-hidden
+                    className={`shrink-0 text-slate-500 transition ${isCmsDropdownOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {isCmsDropdownOpen ? (
+                  <div
+                    role="listbox"
+                    className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl"
+                  >
+                    {cmsConnections.length > 0 ? (
+                      cmsConnections.map((connection) => {
+                        const isSelected =
+                          connection.id === cmsConnectionId && connection.provider === cmsProvider;
+
+                        return (
+                          <button
+                            key={`${connection.provider}-${connection.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => chooseCmsConnection(connection)}
+                            className={`flex w-full rounded-md px-3 py-2.5 text-left transition ${
+                              isSelected
+                                ? "bg-slate-950 text-white"
+                                : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            <span className="truncate text-sm font-semibold">{connection.label}</span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <p className="px-3 py-2 text-sm text-slate-500">
+                        Connect a CMS project first.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              {selectedCmsConnection?.websiteContext ? (
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  AI will use this website context: {selectedCmsConnection.websiteContext}
+                </p>
+              ) : (
+                <p className="mt-2 text-xs italic leading-5 text-slate-500">
+                  Add website context on the Connect page to guide the AI for this project.
+                </p>
+              )}
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
             <label className="block md:col-span-2">
               <span className="text-sm font-semibold text-slate-800">
@@ -691,6 +811,12 @@ export function BlogWorkflow({
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   Adjust the structure manually or ask AI to revise specific parts.
                 </p>
+                {selectedCmsConnection ? (
+                  <p className="mt-3 inline-flex max-w-full items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
+                    <span className="mr-1 text-slate-500">Selected project:</span>
+                    <span className="truncate">{selectedCmsConnection.label}</span>
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
@@ -789,6 +915,12 @@ export function BlogWorkflow({
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 Polish the article, tune metadata, then create a draft in your connected CMS.
               </p>
+              {selectedCmsConnection ? (
+                <p className="mt-3 inline-flex max-w-full items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
+                  <span className="mr-1 text-slate-500">Selected project:</span>
+                  <span className="truncate">{selectedCmsConnection.label}</span>
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
@@ -919,7 +1051,7 @@ export function BlogWorkflow({
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
               >
                 {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                Draft to {connectedProvider || "CMS"}
+                Draft to {selectedCmsProviderLabel}
               </button>
               <button
                 type="button"
@@ -971,7 +1103,7 @@ export function BlogWorkflow({
                 <button
                   type="button"
                   onClick={generateOutline}
-                  disabled={isPending}
+                  disabled={isPending || !cmsConnectionId || !cmsProvider}
                   aria-label="Generate outline"
                   title="Generate outline"
                   className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"

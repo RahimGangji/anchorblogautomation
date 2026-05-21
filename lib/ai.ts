@@ -263,6 +263,7 @@ type SeoBrief = {
   secondaryKeywords?: string;
   seoEntities?: string;
   prompt: string;
+  websiteContext?: string;
 };
 
 export type AiContentReport = z.infer<typeof aiContentReportSchema>;
@@ -271,6 +272,7 @@ function formatSeoBrief(brief: SeoBrief) {
   return `Primary keyword: ${brief.keyword}
 Secondary keywords: ${brief.secondaryKeywords?.trim() || "None provided"}
 SEO entities: ${brief.seoEntities?.trim() || "None provided"}
+Website context: ${brief.websiteContext?.trim() || "None provided"}
 Prompt: ${brief.prompt}`;
 }
 
@@ -333,6 +335,7 @@ export async function reviseContent(params: {
   secondaryKeywords?: string;
   seoEntities?: string;
   prompt: string;
+  websiteContext?: string;
   outline: BlogOutline;
   contentHtml: string;
   slug: string;
@@ -348,6 +351,7 @@ export async function reviseContent(params: {
       secondaryKeywords: params.secondaryKeywords,
       seoEntities: params.seoEntities,
       prompt: params.prompt,
+      websiteContext: params.websiteContext,
     })}
 
 Outline:

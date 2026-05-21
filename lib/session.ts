@@ -18,11 +18,11 @@ function getEncodedSecret() {
 }
 
 export async function createSession(payload: SessionPayload) {
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 2);
   const token = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime("2h")
     .sign(getEncodedSecret());
 
   const cookieStore = await cookies();

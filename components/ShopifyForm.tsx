@@ -9,12 +9,16 @@ type ShopifyFormProps = {
   initialShopDomain?: string;
   initialBlogId?: string;
   initialAuthorName?: string;
+  initialWebsiteContext?: string;
+  disabled?: boolean;
 };
 
 export function ShopifyForm({
   initialShopDomain = "",
   initialBlogId = "",
   initialAuthorName = "",
+  initialWebsiteContext = "",
+  disabled = false,
 }: ShopifyFormProps) {
   const [state, action, pending] = useActionState<ActionResult | undefined, FormData>(
     saveShopifyConnectionAction,
@@ -31,7 +35,20 @@ export function ShopifyForm({
           placeholder="your-store.myshopify.com"
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
           required
+          disabled={disabled}
           autoComplete="url"
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-medium text-slate-700">Website context for AI</span>
+        <textarea
+          name="websiteContext"
+          defaultValue={initialWebsiteContext}
+          rows={4}
+          placeholder="Describe the store, audience, products, tone, locations, and anything AI should know before writing."
+          className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm leading-6 outline-none transition focus:border-slate-950"
+          disabled={disabled}
         />
       </label>
 
@@ -43,6 +60,7 @@ export function ShopifyForm({
           placeholder="shpat_..."
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
           required
+          disabled={disabled}
           autoComplete="new-password"
         />
       </label>
@@ -55,6 +73,7 @@ export function ShopifyForm({
           placeholder="gid://shopify/Blog/123456789 or numeric ID"
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
           required
+          disabled={disabled}
         />
       </label>
 
@@ -66,6 +85,7 @@ export function ShopifyForm({
           placeholder="Rahim"
           className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950"
           required
+          disabled={disabled}
           autoComplete="name"
         />
       </label>
@@ -84,11 +104,11 @@ export function ShopifyForm({
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || disabled}
         className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
       >
         <Cable size={18} aria-hidden />
-        {pending ? "Validating..." : "Connect Shopify"}
+        {pending ? "Validating..." : disabled ? "Project limit reached" : "Connect Shopify"}
       </button>
     </form>
   );

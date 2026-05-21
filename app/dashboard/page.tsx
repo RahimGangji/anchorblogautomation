@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import Link from "next/link";
-import { ArrowRight, Cable, FileText, PenLine } from "lucide-react";
+import { ArrowRight, Cable, PenLine } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
@@ -71,11 +71,23 @@ export default async function DashboardPage() {
                         <h3 className="text-base font-semibold text-slate-950">
                           {project.outline.title || project.keyword}
                         </h3>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Primary keyword: {project.keyword} - {project.status}
+                        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
+                          <span>Primary keyword: {project.keyword}</span>
+                          <span aria-hidden className="text-slate-300">-</span>
+                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-bold uppercase text-slate-800">
+                            {project.status}
+                          </span>
                         </p>
                       </div>
-                      <FileText className="shrink-0 text-slate-400" size={20} />
+                      <Link
+                        href={`/create?projectId=${project._id?.toString()}`}
+                        prefetch
+                        aria-label="Edit project"
+                        title="Edit project"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                      >
+                        <PenLine size={17} aria-hidden />
+                      </Link>
                     </div>
                     {project.cmsDraftLink || project.wordpressLink ? (
                       <a
@@ -87,14 +99,6 @@ export default async function DashboardPage() {
                         View {project.draftProvider === "shopify" ? "Shopify" : "WordPress"} draft
                       </a>
                     ) : null}
-                    <Link
-                      href={`/create?projectId=${project._id?.toString()}`}
-                      prefetch
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      <PenLine size={16} aria-hidden />
-                      Edit
-                    </Link>
                   </article>
                 ))}
               </div>

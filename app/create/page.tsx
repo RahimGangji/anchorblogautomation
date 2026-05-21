@@ -25,15 +25,15 @@ export default async function CreatePage({
     requestedProjectId && ObjectId.isValid(requestedProjectId)
       ? new ObjectId(requestedProjectId)
       : null;
-  const [wordpressConnection, shopifyConnection, aiSettings, project] = await Promise.all([
-    db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
+  const [wordpressConnections, shopifyConnections, aiSettings, project] = await Promise.all([
+    db.collection<WordPressConnectionDocument>("wordpressConnections").find({
       userId,
       status: "connected",
-    }),
-    db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({
+    }).sort({ updatedAt: -1 }).toArray(),
+    db.collection<ShopifyConnectionDocument>("shopifyConnections").find({
       userId,
       status: "connected",
-    }),
+    }).sort({ updatedAt: -1 }).toArray(),
     getAiSettings(userId),
     projectObjectId
       ? db.collection<BlogProjectDocument>("blogProjects").findOne({
@@ -42,7 +42,28 @@ export default async function CreatePage({
         })
       : Promise.resolve(null),
   ]);
-  const connectedProvider = wordpressConnection ? "WordPress" : shopifyConnection ? "Shopify" : "";
+  const cmsConnections = [
+    ...wordpressConnections.map((connection) => ({
+      id: connection._id?.toString() ?? "",
+      provider: "wordpress" as const,
+      label: `WordPress - ${connection.siteUrl}`,
+      websiteContext: connection.websiteContext,
+    })),
+    ...shopifyConnections.map((connection) => ({
+      id: connection._id?.toString() ?? "",
+      provider: "shopify" as const,
+      label: `Shopify - ${connection.shopDomain} / ${connection.blogTitle}`,
+      websiteContext: connection.websiteContext,
+    })),
+  ].filter((connection) => connection.id);
+  const selectedConnection = project?.cmsConnectionId
+    ? cmsConnections.find((connection) => connection.id === project.cmsConnectionId?.toString())
+    : cmsConnections[0];
+  const connectedProvider = selectedConnection
+    ? selectedConnection.provider === "wordpress"
+      ? "WordPress"
+      : "Shopify"
+    : "";
   const activeAiSettings = getActiveAiSettings(aiSettings);
   const initialProject = project?._id
     ? {
@@ -51,6 +72,9 @@ export default async function CreatePage({
         secondaryKeywords: project.secondaryKeywords,
         seoEntities: project.seoEntities,
         prompt: project.prompt,
+        cmsProvider: project.cmsProvider,
+        cmsConnectionId: project.cmsConnectionId?.toString(),
+        websiteContext: project.websiteContext,
         outline: project.outline,
         title: project.title,
         contentHtml: project.contentHtml,
@@ -67,6 +91,7 @@ export default async function CreatePage({
       <BlogWorkflow
         hasConnection={Boolean(connectedProvider)}
         connectedProvider={connectedProvider}
+        cmsConnections={cmsConnections}
         imageModel={imageModelForProvider(activeAiSettings?.provider, activeAiSettings?.model)}
         imageProvider={activeAiSettings?.provider ?? ""}
         initialProject={initialProject}

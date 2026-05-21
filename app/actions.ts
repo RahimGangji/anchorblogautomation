@@ -43,6 +43,8 @@ import {
   validateWordPressConnection,
 } from "@/lib/wordpress";
 
+const MAX_CMS_CONNECTIONS = 3;
+
 async function requireSession() {
   const session = await getSession();
 
@@ -176,6 +178,7 @@ export async function saveWordPressConnectionAction(
     const session = await requireSession();
     const parsed = wordpressConnectionSchema.parse({
       siteUrl: formData.get("siteUrl"),
+      websiteContext: formData.get("websiteContext"),
       wpUsername: formData.get("wpUsername"),
       wpApplicationPassword: formData.get("wpApplicationPassword"),
     });
@@ -187,14 +190,23 @@ export async function saveWordPressConnectionAction(
 
     const db = await getDb();
     const now = new Date();
-    await db.collection<ShopifyConnectionDocument>("shopifyConnections").deleteMany({
-      userId: session.objectUserId,
-    });
+    const existingConnection = await db
+      .collection<WordPressConnectionDocument>("wordpressConnections")
+      .findOne({ userId: session.objectUserId, siteUrl: validated.siteUrl });
+
+    if (!existingConnection) {
+      const totalConnections = await countCmsConnections(session.objectUserId);
+      if (totalConnections >= MAX_CMS_CONNECTIONS) {
+        throw new Error("You can connect up to 3 CMS projects at a time.");
+      }
+    }
+
     await db.collection<WordPressConnectionDocument>("wordpressConnections").updateOne(
-      { userId: session.objectUserId },
+      { userId: session.objectUserId, siteUrl: validated.siteUrl },
       {
         $set: {
           siteUrl: validated.siteUrl,
+          websiteContext: parsed.websiteContext,
           wpUsername: validated.wpUsername,
           wpApplicationPassword: parsed.wpApplicationPassword,
           status: "connected",
@@ -209,6 +221,9 @@ export async function saveWordPressConnectionAction(
       },
       { upsert: true },
     );
+
+    revalidatePath("/connect");
+    revalidatePath("/create");
 
     return { ok: true, data: { connected: true } };
   } catch (error) {
@@ -225,6 +240,7 @@ export async function saveShopifyConnectionAction(
     const parsed = shopifyConnectionSchema.parse({
       shopDomain: formData.get("shopDomain"),
       accessToken: formData.get("accessToken"),
+      websiteContext: formData.get("websiteContext"),
       blogId: formData.get("blogId"),
       authorName: formData.get("authorName"),
     });
@@ -237,14 +253,25 @@ export async function saveShopifyConnectionAction(
 
     const db = await getDb();
     const now = new Date();
-    await db.collection<WordPressConnectionDocument>("wordpressConnections").deleteMany({
+    const existingConnection = await db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({
       userId: session.objectUserId,
+      shopDomain: validated.shopDomain,
+      blogId: validated.blogId,
     });
+
+    if (!existingConnection) {
+      const totalConnections = await countCmsConnections(session.objectUserId);
+      if (totalConnections >= MAX_CMS_CONNECTIONS) {
+        throw new Error("You can connect up to 3 CMS projects at a time.");
+      }
+    }
+
     await db.collection<ShopifyConnectionDocument>("shopifyConnections").updateOne(
-      { userId: session.objectUserId },
+      { userId: session.objectUserId, shopDomain: validated.shopDomain, blogId: validated.blogId },
       {
         $set: {
           shopDomain: validated.shopDomain,
+          websiteContext: parsed.websiteContext,
           accessToken: parsed.accessToken,
           blogId: validated.blogId,
           blogTitle: validated.blogTitle,
@@ -261,16 +288,48 @@ export async function saveShopifyConnectionAction(
       { upsert: true },
     );
 
+    revalidatePath("/connect");
+    revalidatePath("/create");
+
     return { ok: true, data: { connected: true } };
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
 }
 
-export async function removeCmsConnectionAction(): Promise<ActionResult> {
+export async function removeCmsConnectionAction(formData?: FormData): Promise<ActionResult> {
   try {
     const session = await requireSession();
     const db = await getDb();
+    const provider = formData?.get("provider");
+    const connectionId = String(formData?.get("connectionId") ?? "");
+
+    if (provider && connectionId) {
+      if (!ObjectId.isValid(connectionId)) {
+        throw new Error("Invalid CMS project.");
+      }
+
+      const collection =
+        provider === "wordpress"
+          ? db.collection<WordPressConnectionDocument>("wordpressConnections")
+          : provider === "shopify"
+            ? db.collection<ShopifyConnectionDocument>("shopifyConnections")
+            : null;
+
+      if (!collection) {
+        throw new Error("Choose a valid CMS project to remove.");
+      }
+
+      await collection.deleteOne({
+        _id: new ObjectId(connectionId),
+        userId: session.objectUserId,
+      });
+
+      revalidatePath("/connect");
+      revalidatePath("/create");
+
+      return { ok: true, data: { removed: true } };
+    }
 
     await Promise.all([
       db.collection<WordPressConnectionDocument>("wordpressConnections").deleteMany({
@@ -280,6 +339,9 @@ export async function removeCmsConnectionAction(): Promise<ActionResult> {
         userId: session.objectUserId,
       }),
     ]);
+
+    revalidatePath("/connect");
+    revalidatePath("/create");
 
     return { ok: true, data: { removed: true } };
   } catch (error) {
@@ -422,6 +484,8 @@ function parseImageSize(value: unknown): ImageSize {
 }
 
 export async function generateOutlineAction(input: {
+  cmsProvider: "wordpress" | "shopify";
+  cmsConnectionId: string;
   keyword: string;
   secondaryKeywords?: string;
   seoEntities?: string;
@@ -430,17 +494,28 @@ export async function generateOutlineAction(input: {
   try {
     const session = await requireSession();
     const parsed = createOutlineSchema.parse(input);
+    const cmsConnectionId = parseCmsConnectionId(parsed.cmsConnectionId);
     const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
-    const outline = await createOutline(parsed, settings);
+    const db = await getDb();
+    const cmsConnection = await getCmsConnection(
+      db,
+      session.objectUserId,
+      parsed.cmsProvider,
+      cmsConnectionId,
+    );
+    const websiteContext = cmsConnection.websiteContext ?? "";
+    const outline = await createOutline({ ...parsed, websiteContext }, settings);
     const now = new Date();
 
-    const db = await getDb();
     const result = await db.collection<BlogProjectDocument>("blogProjects").insertOne({
       userId: session.objectUserId,
       keyword: parsed.keyword,
       secondaryKeywords: parsed.secondaryKeywords,
       seoEntities: parsed.seoEntities,
       prompt: parsed.prompt,
+      cmsProvider: parsed.cmsProvider,
+      cmsConnectionId,
+      websiteContext,
       outline,
       contentHtml: "",
       slug: "",
@@ -492,6 +567,7 @@ export async function refineOutlineAction(input: {
         secondaryKeywords: project.secondaryKeywords,
         seoEntities: project.seoEntities,
         prompt: project.prompt,
+        websiteContext: project.websiteContext,
       },
       outline,
       input.instruction,
@@ -546,6 +622,7 @@ export async function generateContentAction(input: {
         secondaryKeywords: project.secondaryKeywords,
         seoEntities: project.seoEntities,
         prompt: project.prompt,
+        websiteContext: project.websiteContext,
       },
       outline,
       settings,
@@ -556,6 +633,7 @@ export async function generateContentAction(input: {
         secondaryKeywords: project.secondaryKeywords,
         seoEntities: project.seoEntities,
         prompt: project.prompt,
+        websiteContext: project.websiteContext,
       },
       content,
       settings,
@@ -630,6 +708,7 @@ export async function refineContentAction(input: {
       secondaryKeywords: project.secondaryKeywords,
       seoEntities: project.seoEntities,
       prompt: project.prompt,
+      websiteContext: project.websiteContext,
       outline,
       contentHtml: input.contentHtml,
       slug: input.slug,
@@ -644,6 +723,7 @@ export async function refineContentAction(input: {
         secondaryKeywords: project.secondaryKeywords,
         seoEntities: project.seoEntities,
         prompt: project.prompt,
+        websiteContext: project.websiteContext,
       },
       {
         title: content.title,
@@ -763,6 +843,7 @@ export async function analyzeContentAction(input: {
         secondaryKeywords: project.secondaryKeywords,
         seoEntities: project.seoEntities,
         prompt: project.prompt,
+        websiteContext: project.websiteContext,
       },
       {
         title: input.title,
@@ -823,44 +904,36 @@ export async function publishDraftAction(input: {
     const slug = slugSchema.parse(input.slug);
 
     const db = await getDb();
-    const [project, wordpressConnection, shopifyConnection] = await Promise.all([
-      db.collection<BlogProjectDocument>("blogProjects").findOne({
-        _id: new ObjectId(input.projectId),
-        userId: session.objectUserId,
-      }),
-      db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
-        userId: session.objectUserId,
-        status: "connected",
-      }),
-      db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({
-        userId: session.objectUserId,
-        status: "connected",
-      }),
-    ]);
+    const project = await db.collection<BlogProjectDocument>("blogProjects").findOne({
+      _id: new ObjectId(input.projectId),
+      userId: session.objectUserId,
+    });
 
     if (!project) {
       throw new Error("Project not found.");
     }
 
-    if (wordpressConnection && shopifyConnection) {
-      throw new Error("Only one CMS can be connected at a time. Remove one connection before drafting.");
+    if (!project.cmsProvider || !project.cmsConnectionId) {
+      throw new Error("This blog does not have a selected CMS project. Create a new blog and choose one before generating the outline.");
     }
 
-    if (!wordpressConnection && !shopifyConnection) {
-      throw new Error("Connect WordPress or Shopify before drafting.");
-    }
-
-    const provider = wordpressConnection ? "wordpress" : "shopify";
-    const draft = wordpressConnection
+    const cmsConnection = await getCmsConnection(
+      db,
+      session.objectUserId,
+      project.cmsProvider,
+      project.cmsConnectionId,
+    );
+    const provider = project.cmsProvider;
+    const draft = provider === "wordpress"
       ? await createWordPressDraft(
-          wordpressConnection,
+          cmsConnection as WordPressConnectionDocument,
           input.title,
           input.contentHtml,
           slug,
           input.featuredImage,
         )
       : await createShopifyDraft(
-          shopifyConnection as ShopifyConnectionDocument,
+          cmsConnection as ShopifyConnectionDocument,
           input.title,
           input.contentHtml,
           input.metaDescription,
@@ -881,7 +954,7 @@ export async function publishDraftAction(input: {
           cmsDraftId: String(draft.id),
           cmsDraftLink: draft.link,
           status: "drafted",
-          ...(wordpressConnection
+          ...(provider === "wordpress"
             ? {
                 wordpressPostId: Number(draft.id),
                 wordpressLink: draft.link,
@@ -889,7 +962,7 @@ export async function publishDraftAction(input: {
             : {}),
           updatedAt: new Date(),
         },
-        ...(wordpressConnection
+        ...(provider === "wordpress"
           ? {}
           : { $unset: { wordpressPostId: "", wordpressLink: "" } }),
       },
@@ -906,4 +979,51 @@ export async function publishDraftAction(input: {
   } catch (error) {
     return { ok: false, error: flattenError(error) };
   }
+}
+
+async function countCmsConnections(userId: ObjectId) {
+  const db = await getDb();
+  const [wordpressCount, shopifyCount] = await Promise.all([
+    db.collection<WordPressConnectionDocument>("wordpressConnections").countDocuments({
+      userId,
+      status: "connected",
+    }),
+    db.collection<ShopifyConnectionDocument>("shopifyConnections").countDocuments({
+      userId,
+      status: "connected",
+    }),
+  ]);
+
+  return wordpressCount + shopifyCount;
+}
+
+function parseCmsConnectionId(value: string) {
+  if (!ObjectId.isValid(value)) {
+    throw new Error("Choose a valid CMS project.");
+  }
+
+  return new ObjectId(value);
+}
+
+async function getCmsConnection(
+  db: Awaited<ReturnType<typeof getDb>>,
+  userId: ObjectId,
+  provider: "wordpress" | "shopify",
+  connectionId: ObjectId,
+) {
+  const collection =
+    provider === "wordpress"
+      ? db.collection<WordPressConnectionDocument>("wordpressConnections")
+      : db.collection<ShopifyConnectionDocument>("shopifyConnections");
+  const connection = await collection.findOne({
+    _id: connectionId,
+    userId,
+    status: "connected",
+  });
+
+  if (!connection) {
+    throw new Error("Selected CMS project was not found. Connect it again or choose another project.");
+  }
+
+  return connection;
 }
