@@ -88,6 +88,29 @@ export const contentSchema = z.object({
   metaDescription: z.string().trim().min(40).max(180),
 });
 
+const screenshotSchema = z.object({
+  dataUrl: z.string().trim().startsWith("data:image/", "Screenshot must be an image data URL."),
+  fileName: z.string().trim().min(1).max(160),
+  mimeType: z.string().trim().regex(/^image\/(png|jpe?g|webp)$/i, "Use a PNG, JPG, or WebP screenshot."),
+});
+
+export const landingPageInputSchema = z.object({
+  wordpressConnectionId: z.string().trim().min(1, "Choose the WordPress project for this landing page."),
+  title: z.string().trim().min(3, "Landing page title is required.").max(120),
+  intent: z.string().trim().min(5, "Intent must describe what this page should achieve.").max(500),
+  prompt: z.string().trim().min(10, "Prompt must describe the landing page you want.").max(2500),
+  designInspiration: z.string().trim().max(1500, "Design inspiration must be 1500 characters or fewer.").optional().default(""),
+  screenshot: screenshotSchema.optional().nullable(),
+});
+
+export const landingPageContentSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  slug: slugSchema,
+  html: z.string().trim().min(100),
+  css: z.string().trim().min(40),
+  notes: z.string().trim().max(500).optional().default(""),
+});
+
 const aiContentIssueSchema = z.object({
   severity: z.enum(["good", "warning", "error"]),
   location: z.string().trim().min(2),

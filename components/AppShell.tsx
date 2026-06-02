@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { ChevronDown, KeyRound, LogOut, Menu, PenLine, PlugZap, X } from "lucide-react";
+import { ChevronDown, FileText, KeyRound, LogOut, Menu, PenLine, PlugZap, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { logoutAction } from "@/app/actions";
@@ -16,7 +16,8 @@ type AppShellProps = {
 };
 
 const navItems = [
-  { href: "/create", label: "Create", icon: PenLine },
+  { href: "/create", label: "Create Blog", icon: PenLine },
+  { href: "/create-landing-page", label: "Landing Page", icon: FileText },
   { href: "/connect", label: "Connect", icon: PlugZap },
   { href: "/api-keys", label: "API Keys", icon: KeyRound },
 ];

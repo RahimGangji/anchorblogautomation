@@ -1,11 +1,12 @@
 import { ObjectId } from "mongodb";
 import Link from "next/link";
-import { ArrowRight, Cable, PenLine } from "lucide-react";
+import { ArrowRight, Cable, FileText, PenLine } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type {
   BlogProjectDocument,
+  LandingPageProjectDocument,
   ShopifyConnectionDocument,
   WordPressConnectionDocument,
 } from "@/lib/types";
@@ -14,7 +15,7 @@ export default async function DashboardPage() {
   const user = await requireUser();
   const db = await getDb();
   const userId = new ObjectId(user.id);
-  const [wordpressConnection, shopifyConnection, projects] = await Promise.all([
+  const [wordpressConnection, shopifyConnection, projects, landingPages] = await Promise.all([
     db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({ userId }),
     db.collection<ShopifyConnectionDocument>("shopifyConnections").findOne({ userId }),
     db
@@ -23,7 +24,40 @@ export default async function DashboardPage() {
       .sort({ updatedAt: -1 })
       .limit(6)
       .toArray(),
+    db
+      .collection<LandingPageProjectDocument>("landingPageProjects")
+      .find({ userId })
+      .sort({ updatedAt: -1 })
+      .limit(6)
+      .toArray(),
   ]);
+  const recentProjects = [
+    ...projects.map((project) => ({
+      id: project._id?.toString() ?? "",
+      type: "blog" as const,
+      title: project.outline.title || project.keyword,
+      detail: `Primary keyword: ${project.keyword}`,
+      status: project.status,
+      href: `/create?projectId=${project._id?.toString()}`,
+      draftLink: project.cmsDraftLink ?? project.wordpressLink ?? "",
+      draftLabel: project.draftProvider === "shopify" ? "Shopify" : "WordPress",
+      updatedAt: project.updatedAt,
+    })),
+    ...landingPages.map((project) => ({
+      id: project._id?.toString() ?? "",
+      type: "landing page" as const,
+      title: project.title,
+      detail: `Intent: ${project.intent}`,
+      status: project.status,
+      href: `/create-landing-page?projectId=${project._id?.toString()}`,
+      draftLink: project.wordpressLink ?? "",
+      draftLabel: "WordPress page",
+      updatedAt: project.updatedAt,
+    })),
+  ]
+    .filter((project) => project.id)
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, 6);
   const activeConnection = wordpressConnection?.status === "connected"
     ? { provider: "WordPress", detail: wordpressConnection.siteUrl }
     : shopifyConnection?.status === "connected"
@@ -38,8 +72,8 @@ export default async function DashboardPage() {
             <div className="min-w-0 flex-1">
               <h1 className="text-2xl font-semibold text-slate-950">Dashboard</h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Create blog briefs, generate outlines, edit content, and send finished work to
-                your connected CMS as drafts.
+                Create blog briefs and landing pages, preview AI-generated content, and send
+                finished work to your connected CMS as drafts.
               </p>
               {!activeConnection ? (
                 <p className="mt-2 text-xs leading-5 text-slate-500">
@@ -48,39 +82,52 @@ export default async function DashboardPage() {
                 </p>
               ) : null}
             </div>
-            <Link
-              href="/create"
-              prefetch
-              className="relative z-10 inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950 sm:w-auto"
-            >
-              <PenLine size={18} aria-hidden />
-              Create blog
-            </Link>
+            <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+              <Link
+                href="/create"
+                prefetch
+                className="relative z-10 inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+              >
+                <PenLine size={18} aria-hidden />
+                Create blog
+              </Link>
+              <Link
+                href="/create-landing-page"
+                prefetch
+                className="relative z-10 inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+              >
+                <FileText size={18} aria-hidden />
+                Create landing page
+              </Link>
+            </div>
           </div>
 
           <div className="mt-8 space-y-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">
               Recent projects
             </h2>
-            {projects.length > 0 ? (
+            {recentProjects.length > 0 ? (
               <div className="grid gap-3">
-                {projects.map((project) => (
-                  <article key={project._id?.toString()} className="rounded-lg border border-slate-200 p-4">
+                {recentProjects.map((project) => (
+                  <article key={`${project.type}-${project.id}`} className="rounded-lg border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h3 className="text-base font-semibold text-slate-950">
-                          {project.outline.title || project.keyword}
+                          {project.title}
                         </h3>
                         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
-                          <span>Primary keyword: {project.keyword}</span>
+                          <span>{project.detail}</span>
                           <span aria-hidden className="text-slate-300">-</span>
                           <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-bold uppercase text-slate-800">
                             {project.status}
                           </span>
+                          <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-bold uppercase text-emerald-800">
+                            {project.type}
+                          </span>
                         </p>
                       </div>
                       <Link
-                        href={`/create?projectId=${project._id?.toString()}`}
+                        href={project.href}
                         prefetch
                         aria-label="Edit project"
                         title="Edit project"
@@ -89,14 +136,14 @@ export default async function DashboardPage() {
                         <PenLine size={17} aria-hidden />
                       </Link>
                     </div>
-                    {project.cmsDraftLink || project.wordpressLink ? (
+                    {project.draftLink ? (
                       <a
-                        href={project.cmsDraftLink ?? project.wordpressLink}
+                        href={project.draftLink}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:underline"
                       >
-                        View {project.draftProvider === "shopify" ? "Shopify" : "WordPress"} draft
+                        View {project.draftLabel} draft
                       </a>
                     ) : null}
                   </article>

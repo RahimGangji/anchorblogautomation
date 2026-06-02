@@ -12,6 +12,7 @@ import type {
   ActionResult,
   BlogOutline,
   BlogProjectDocument,
+  LandingPageProjectDocument,
   ShopifyConnectionDocument,
   UserDocument,
   WordPressConnectionDocument,
@@ -19,6 +20,8 @@ import type {
 import {
   aiSettingsSchema,
   createOutlineSchema,
+  landingPageContentSchema,
+  landingPageInputSchema,
   loginSchema,
   outlineSchema,
   shopifyConnectionSchema,
@@ -29,8 +32,10 @@ import {
 import {
   analyzeContentWithAi,
   createContent,
+  createLandingPage,
   createOutline,
   reviseContent,
+  reviseLandingPage,
   reviseOutline,
 } from "@/lib/ai";
 import type { AiContentReport } from "@/lib/ai";
@@ -39,11 +44,14 @@ import { generateImageWithAi } from "@/lib/imageAi";
 import type { GeneratedImage, ImageSize } from "@/lib/imageAi";
 import { createShopifyDraft, validateShopifyConnection } from "@/lib/shopify";
 import {
+  createWordPressPageDraft,
   createWordPressDraft,
+  updateWordPressPageDraft,
   validateWordPressConnection,
 } from "@/lib/wordpress";
 
 const MAX_CMS_CONNECTIONS = 3;
+const MAX_LANDING_SCREENSHOT_DATA_URL_LENGTH = 1_600_000;
 
 async function requireSession() {
   const session = await getSession();
@@ -481,6 +489,607 @@ export async function generateBlogImageAction(input: {
 function parseImageSize(value: unknown): ImageSize {
   if (value === "1024x1536" || value === "1536x1024") return value;
   return "1024x1024";
+}
+
+function validateLandingScreenshotSize(
+  screenshot: { dataUrl: string; fileName: string; mimeType: string } | null | undefined,
+) {
+  if (screenshot && screenshot.dataUrl.length > MAX_LANDING_SCREENSHOT_DATA_URL_LENGTH) {
+    throw new Error("Screenshot is too large. Upload a smaller screenshot under about 1 MB.");
+  }
+}
+
+function landingPagePreviewHtml(html: string, css: string) {
+  return `<style data-anchor-landing>${scopeLandingCss(css)}</style>\n${html}`;
+}
+
+function scopeLandingCss(css: string) {
+  const cleaned = css
+    .replace(/<style\b[^>]*>/gi, "")
+    .replace(/<\/style>/gi, "")
+    .trim();
+
+  if (!cleaned) return "";
+
+  return cleaned.replace(/(^|})\s*([^@{}][^{}]*)\{/g, (match, close: string, selectorGroup: string) => {
+    const scopedSelectors = selectorGroup
+      .split(",")
+      .map((selector) => {
+        const trimmed = selector.trim();
+        if (!trimmed) return "";
+        if (
+          trimmed.startsWith(".anchor-landing-page") ||
+          trimmed.startsWith("html") ||
+          trimmed.startsWith("body") ||
+          trimmed.startsWith("*")
+        ) {
+          return trimmed;
+        }
+        return `.anchor-landing-page ${trimmed}`;
+      })
+      .filter(Boolean)
+      .join(", ");
+
+    return `${close} ${scopedSelectors} {`;
+  });
+}
+
+function extractFirstSection(value: string) {
+  const start = value.search(/<section\b/i);
+  if (start === -1) return "";
+
+  const fromSection = value.slice(start);
+  const end = fromSection.search(/<\/section>/i);
+  if (end === -1) return "";
+
+  return fromSection
+    .slice(0, end + "</section>".length)
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<link\b[^>]*>/gi, "")
+    .trim();
+}
+
+function replaceFirstLandingSection(html: string, sectionHtml: string) {
+  const wrapperMatch = html.match(/<main\b[^>]*class=(["'])[^"']*\banchor-landing-page\b[^"']*\1[^>]*>([\s\S]*)<\/main>/i);
+  const bodyHtml = wrapperMatch?.[2] ?? html;
+  const firstSection = bodyHtml.match(/<section\b[\s\S]*?<\/section>/i);
+
+  if (firstSection) {
+    const replaced = `${bodyHtml.slice(0, firstSection.index)}${sectionHtml}${bodyHtml.slice((firstSection.index ?? 0) + firstSection[0].length)}`;
+    return `<main class="anchor-landing-page">${replaced}</main>`;
+  }
+
+  return `<main class="anchor-landing-page">${sectionHtml}${bodyHtml}</main>`;
+}
+
+function landingUtilityCss() {
+  return `
+.anchor-landing-page [class~="relative"] { position: relative; }
+.anchor-landing-page [class~="absolute"] { position: absolute; }
+.anchor-landing-page [class~="inset-0"] { inset: 0; }
+.anchor-landing-page [class~="-inset-1"] { inset: -0.25rem; }
+.anchor-landing-page [class~="-z-10"] { z-index: -10; }
+.anchor-landing-page [class~="overflow-hidden"] { overflow: hidden; }
+.anchor-landing-page [class~="transform-gpu"] { transform: translateZ(0); }
+.anchor-landing-page [class~="blur-3xl"] { filter: blur(64px); }
+.anchor-landing-page [class~="blur-lg"] { filter: blur(16px); }
+.anchor-landing-page [class~="rotate-[30deg]"] { transform: rotate(30deg); }
+.anchor-landing-page [class~="-translate-x-1/12"] { transform: translateX(-8.333333%); }
+.anchor-landing-page [class~="left-[calc(50%-11rem)]"] { left: calc(50% - 11rem); }
+.anchor-landing-page [class~="aspect-[1155/678]"] { aspect-ratio: 1155 / 678; }
+.anchor-landing-page [class~="w-[36.125rem]"] { width: 36.125rem; }
+.anchor-landing-page [class~="w-full"] { width: 100%; }
+.anchor-landing-page [class~="w-fit"] { width: fit-content; }
+.anchor-landing-page [class~="h-2"] { height: 0.5rem; }
+.anchor-landing-page [class~="w-2"] { width: 0.5rem; }
+.anchor-landing-page [class~="h-2.5"] { height: 0.625rem; }
+.anchor-landing-page [class~="w-2.5"] { width: 0.625rem; }
+.anchor-landing-page [class~="h-24"] { height: 6rem; }
+.anchor-landing-page [class~="h-64"] { height: 16rem; }
+.anchor-landing-page [class~="w-auto"] { width: auto; }
+.anchor-landing-page [class~="max-w-xl"] { max-width: 36rem; }
+.anchor-landing-page [class~="max-w-md"] { max-width: 28rem; }
+.anchor-landing-page [class~="max-w-7xl"] { max-width: 80rem; }
+.anchor-landing-page [class~="mx-auto"] { margin-left: auto; margin-right: auto; }
+.anchor-landing-page [class~="mt-1"] { margin-top: 0.25rem; }
+.anchor-landing-page [class~="mt-4"] { margin-top: 1rem; }
+.anchor-landing-page [class~="mt-6"] { margin-top: 1.5rem; }
+.anchor-landing-page [class~="mt-10"] { margin-top: 2.5rem; }
+.anchor-landing-page [class~="mt-12"] { margin-top: 3rem; }
+.anchor-landing-page [class~="mt-16"] { margin-top: 4rem; }
+.anchor-landing-page [class~="mb-4"] { margin-bottom: 1rem; }
+.anchor-landing-page [class~="mb-6"] { margin-bottom: 1.5rem; }
+.anchor-landing-page [class~="ml-2"] { margin-left: 0.5rem; }
+.anchor-landing-page [class~="px-4"] { padding-left: 1rem; padding-right: 1rem; }
+.anchor-landing-page [class~="px-6"] { padding-left: 1.5rem; padding-right: 1.5rem; }
+.anchor-landing-page [class~="px-8"] { padding-left: 2rem; padding-right: 2rem; }
+.anchor-landing-page [class~="py-1.5"] { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+.anchor-landing-page [class~="py-4"] { padding-top: 1rem; padding-bottom: 1rem; }
+.anchor-landing-page [class~="py-24"] { padding-top: 6rem; padding-bottom: 6rem; }
+.anchor-landing-page [class~="p-4"] { padding: 1rem; }
+.anchor-landing-page [class~="p-6"] { padding: 1.5rem; }
+.anchor-landing-page [class~="pb-4"] { padding-bottom: 1rem; }
+.anchor-landing-page [class~="pt-8"] { padding-top: 2rem; }
+.anchor-landing-page [class~="flex"] { display: flex; }
+.anchor-landing-page [class~="inline-flex"] { display: inline-flex; }
+.anchor-landing-page [class~="grid"] { display: grid; }
+.anchor-landing-page [class~="flex-col"] { flex-direction: column; }
+.anchor-landing-page [class~="items-center"] { align-items: center; }
+.anchor-landing-page [class~="justify-center"] { justify-content: center; }
+.anchor-landing-page [class~="grid-cols-3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.anchor-landing-page [class~="gap-1.5"] { gap: 0.375rem; }
+.anchor-landing-page [class~="gap-4"] { gap: 1rem; }
+.anchor-landing-page [class~="gap-x-2"] { column-gap: 0.5rem; }
+.anchor-landing-page [class~="rounded-full"] { border-radius: 9999px; }
+.anchor-landing-page [class~="rounded-lg"] { border-radius: 0.5rem; }
+.anchor-landing-page [class~="rounded-xl"] { border-radius: 0.75rem; }
+.anchor-landing-page [class~="rounded-2xl"] { border-radius: 1rem; }
+.anchor-landing-page [class~="border"] { border-width: 1px; border-style: solid; }
+.anchor-landing-page [class~="border-t"] { border-top-width: 1px; border-top-style: solid; }
+.anchor-landing-page [class~="border-b"] { border-bottom-width: 1px; border-bottom-style: solid; }
+.anchor-landing-page [class~="border-slate-800"] { border-color: #1e293b; }
+.anchor-landing-page [class~="border-slate-900"] { border-color: #0f172a; }
+.anchor-landing-page [class~="border-slate-800/80"] { border-color: rgba(30, 41, 59, 0.8); }
+.anchor-landing-page [class~="bg-slate-950"] { background-color: #020617; }
+.anchor-landing-page [class~="bg-slate-900/50"] { background-color: rgba(15, 23, 42, 0.5); }
+.anchor-landing-page [class~="bg-indigo-600"] { background-color: #4f46e5; }
+.anchor-landing-page [class~="bg-indigo-500/10"] { background-color: rgba(99, 102, 241, 0.1); }
+.anchor-landing-page [class~="bg-emerald-400"] { background-color: #34d399; }
+.anchor-landing-page [class~="bg-rose-500/40"] { background-color: rgba(244, 63, 94, 0.4); }
+.anchor-landing-page [class~="bg-amber-500/40"] { background-color: rgba(245, 158, 11, 0.4); }
+.anchor-landing-page [class~="bg-emerald-500/40"] { background-color: rgba(16, 185, 129, 0.4); }
+.anchor-landing-page [class~="bg-gradient-to-b"] { background-image: linear-gradient(to bottom, #0f172a, #0f172a, #020617); }
+.anchor-landing-page [class~="bg-gradient-to-tr"] { background-image: linear-gradient(to top right, #6366f1, #34d399); }
+.anchor-landing-page [class~="bg-gradient-to-r"] { background-image: linear-gradient(to right, #818cf8, #38bdf8, #34d399); }
+.anchor-landing-page [class~="bg-clip-text"] { -webkit-background-clip: text; background-clip: text; }
+.anchor-landing-page [class~="text-transparent"] { color: transparent; }
+.anchor-landing-page [class~="opacity-20"] { opacity: 0.2; }
+.anchor-landing-page [class~="opacity-30"] { opacity: 0.3; }
+.anchor-landing-page [class~="text-center"] { text-align: center; }
+.anchor-landing-page [class~="text-white"] { color: #fff; }
+.anchor-landing-page [class~="text-indigo-400"] { color: #818cf8; }
+.anchor-landing-page [class~="text-emerald-400/80"] { color: rgba(52, 211, 153, 0.8); }
+.anchor-landing-page [class~="text-slate-300"] { color: #cbd5e1; }
+.anchor-landing-page [class~="text-slate-400"] { color: #94a3b8; }
+.anchor-landing-page [class~="text-slate-500"] { color: #64748b; }
+.anchor-landing-page [class~="text-slate-600"] { color: #475569; }
+.anchor-landing-page [class~="text-[10px]"] { font-size: 10px; }
+.anchor-landing-page [class~="text-xs"] { font-size: 0.75rem; line-height: 1rem; }
+.anchor-landing-page [class~="text-sm"] { font-size: 0.875rem; line-height: 1.25rem; }
+.anchor-landing-page [class~="text-lg"] { font-size: 1.125rem; line-height: 1.75rem; }
+.anchor-landing-page [class~="text-2xl"] { font-size: 1.5rem; line-height: 2rem; }
+.anchor-landing-page [class~="text-4xl"] { font-size: 2.25rem; line-height: 2.5rem; }
+.anchor-landing-page [class~="font-mono"] { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.anchor-landing-page [class~="font-medium"] { font-weight: 500; }
+.anchor-landing-page [class~="font-semibold"] { font-weight: 600; }
+.anchor-landing-page [class~="font-bold"] { font-weight: 700; }
+.anchor-landing-page [class~="font-extrabold"] { font-weight: 800; }
+.anchor-landing-page [class~="tracking-tight"] { letter-spacing: -0.025em; }
+.anchor-landing-page [class~="leading-none"] { line-height: 1; }
+.anchor-landing-page [class~="leading-8"] { line-height: 2rem; }
+.anchor-landing-page [class~="shadow-lg"] { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.18), 0 4px 6px -2px rgba(0, 0, 0, 0.12); }
+.anchor-landing-page [class~="shadow-2xl"] { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+.anchor-landing-page [class~="shadow-indigo-600/30"] { box-shadow: 0 18px 30px rgba(79, 70, 229, 0.3); }
+.anchor-landing-page [class~="ring-1"] { box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2); }
+.anchor-landing-page [class~="transition-all"] { transition-property: all; }
+.anchor-landing-page [class~="duration-200"] { transition-duration: 200ms; }
+.anchor-landing-page [class~="hover:bg-indigo-500"]:hover { background-color: #6366f1; }
+.anchor-landing-page [class~="animate-pulse"] { animation: anchorLandingPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+@keyframes anchorLandingPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (min-width: 640px) {
+  .anchor-landing-page [class~="sm:py-32"] { padding-top: 8rem; padding-bottom: 8rem; }
+  .anchor-landing-page [class~="sm:w-[72.1875rem]"] { width: 72.1875rem; }
+  .anchor-landing-page [class~="sm:left-[calc(50%-30rem)]"] { left: calc(50% - 30rem); }
+  .anchor-landing-page [class~="sm:flex-row"] { flex-direction: row; }
+  .anchor-landing-page [class~="sm:items-center"] { align-items: center; }
+  .anchor-landing-page [class~="sm:text-left"] { text-align: left; }
+  .anchor-landing-page [class~="sm:text-6xl"] { font-size: 3.75rem; line-height: 1; }
+  .anchor-landing-page [class~="sm:mt-24"] { margin-top: 6rem; }
+}
+@media (min-width: 1024px) {
+  .anchor-landing-page [class~="lg:grid"] { display: grid; }
+  .anchor-landing-page [class~="lg:grid-cols-12"] { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .anchor-landing-page [class~="lg:gap-x-8"] { column-gap: 2rem; }
+  .anchor-landing-page [class~="lg:px-8"] { padding-left: 2rem; padding-right: 2rem; }
+  .anchor-landing-page [class~="lg:col-span-7"] { grid-column: span 7 / span 7; }
+  .anchor-landing-page [class~="lg:col-span-5"] { grid-column: span 5 / span 5; }
+  .anchor-landing-page [class~="lg:mt-0"] { margin-top: 0; }
+  .anchor-landing-page [class~="lg:max-w-none"] { max-width: none; }
+}
+`;
+}
+
+function fallbackLandingPageRefine(input: {
+  title: string;
+  slug: string;
+  html: string;
+  css: string;
+  instruction: string;
+  screenshotUsed: boolean;
+}) {
+  const section = extractFirstSection(input.instruction);
+  if (!section) return null;
+
+  const css = input.css.includes("anchorLandingPulse")
+    ? input.css
+    : `${input.css.trim()}\n\n${landingUtilityCss()}`;
+
+  return landingPageContentSchema.parse({
+    title: input.title,
+    slug: input.slug,
+    html: replaceFirstLandingSection(input.html, section),
+    css,
+    notes: "Applied the pasted hero section directly after the AI provider failed to return valid JSON.",
+  });
+}
+
+async function getWordPressConnectionForLandingPage(
+  userId: ObjectId,
+  wordpressConnectionId: ObjectId,
+) {
+  const db = await getDb();
+  const connection = await db.collection<WordPressConnectionDocument>("wordpressConnections").findOne({
+    _id: wordpressConnectionId,
+    userId,
+    status: "connected",
+  });
+
+  if (!connection) {
+    throw new Error("Choose a connected WordPress project for this landing page.");
+  }
+
+  return connection;
+}
+
+function parseWordPressConnectionId(value: string) {
+  if (!ObjectId.isValid(value)) {
+    throw new Error("Choose a valid WordPress project.");
+  }
+
+  return new ObjectId(value);
+}
+
+export async function generateLandingPageAction(input: {
+  wordpressConnectionId: string;
+  title: string;
+  intent: string;
+  prompt: string;
+  designInspiration?: string;
+  screenshot?: {
+    dataUrl: string;
+    fileName: string;
+    mimeType: string;
+  } | null;
+}): Promise<
+  ActionResult<{
+    projectId: string;
+    title: string;
+    slug: string;
+    html: string;
+    css: string;
+    notes: string;
+    screenshotUsed: boolean;
+  }>
+> {
+  try {
+    const session = await requireSession();
+    const parsed = landingPageInputSchema.parse(input);
+    validateLandingScreenshotSize(parsed.screenshot);
+
+    const wordpressConnectionId = parseWordPressConnectionId(parsed.wordpressConnectionId);
+    const connection = await getWordPressConnectionForLandingPage(
+      session.objectUserId,
+      wordpressConnectionId,
+    );
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+    const page = await createLandingPage(
+      {
+        title: parsed.title,
+        intent: parsed.intent,
+        prompt: parsed.prompt,
+        designInspiration: parsed.designInspiration,
+        screenshot: parsed.screenshot,
+        websiteContext: connection.websiteContext,
+      },
+      settings,
+    );
+    const now = new Date();
+    const db = await getDb();
+    const result = await db.collection<LandingPageProjectDocument>("landingPageProjects").insertOne({
+      userId: session.objectUserId,
+      wordpressConnectionId,
+      websiteContext: connection.websiteContext ?? "",
+      prompt: parsed.prompt,
+      intent: parsed.intent,
+      designInspiration: parsed.designInspiration,
+      screenshot: parsed.screenshot ?? null,
+      title: page.title,
+      html: page.html,
+      css: page.css,
+      slug: page.slug,
+      notes: page.notes,
+      screenshotUsed: page.screenshotUsed,
+      status: "content",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    revalidatePath("/dashboard");
+
+    return {
+      ok: true,
+      data: {
+        projectId: result.insertedId.toString(),
+        title: page.title,
+        slug: page.slug,
+        html: page.html,
+        css: page.css,
+        notes: page.notes,
+        screenshotUsed: page.screenshotUsed,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function refineLandingPageAction(input: {
+  projectId: string;
+  title: string;
+  intent: string;
+  prompt: string;
+  designInspiration?: string;
+  screenshot?: {
+    dataUrl: string;
+    fileName: string;
+    mimeType: string;
+  } | null;
+  html: string;
+  css: string;
+  slug: string;
+  instruction: string;
+}): Promise<ActionResult<{
+  title: string;
+  slug: string;
+  html: string;
+  css: string;
+  notes: string;
+  screenshotUsed: boolean;
+}>> {
+  try {
+    const session = await requireSession();
+
+    if (!ObjectId.isValid(input.projectId)) {
+      throw new Error("Invalid landing page project.");
+    }
+
+    if (input.instruction.trim().length < 5) {
+      throw new Error("Tell AI what to change in the landing page.");
+    }
+    validateLandingScreenshotSize(input.screenshot);
+
+    const db = await getDb();
+    const project = await db.collection<LandingPageProjectDocument>("landingPageProjects").findOne({
+      _id: new ObjectId(input.projectId),
+      userId: session.objectUserId,
+    });
+
+    if (!project) {
+      throw new Error("Landing page project not found.");
+    }
+
+    const settings = getActiveAiSettings(await getAiSettings(session.objectUserId));
+    const screenshot = input.screenshot ?? project.screenshot ?? null;
+    let page: {
+      title: string;
+      slug: string;
+      html: string;
+      css: string;
+      notes: string;
+      screenshotUsed: boolean;
+    };
+
+    try {
+      page = await reviseLandingPage({
+        title: input.title,
+        intent: input.intent,
+        prompt: input.prompt,
+        designInspiration: input.designInspiration,
+        websiteContext: project.websiteContext,
+        screenshot,
+        html: input.html,
+        css: input.css,
+        slug: input.slug,
+        instruction: input.instruction,
+        settings,
+      });
+    } catch (error) {
+      const fallback = fallbackLandingPageRefine({
+        title: input.title,
+        slug: input.slug,
+        html: input.html,
+        css: input.css,
+        instruction: input.instruction,
+        screenshotUsed: project.screenshotUsed,
+      });
+
+      if (!fallback) {
+        throw error;
+      }
+
+      page = {
+        ...fallback,
+        screenshotUsed: project.screenshotUsed,
+      };
+    }
+
+    await db.collection<LandingPageProjectDocument>("landingPageProjects").updateOne(
+      { _id: project._id, userId: session.objectUserId },
+      {
+        $set: {
+          title: page.title,
+          html: page.html,
+          css: page.css,
+          slug: page.slug,
+          notes: page.notes,
+          screenshotUsed: page.screenshotUsed,
+          screenshot,
+          prompt: input.prompt.trim(),
+          intent: input.intent.trim(),
+          designInspiration: input.designInspiration?.trim() ?? "",
+          status: "content",
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    revalidatePath("/dashboard");
+    revalidatePath("/create-landing-page");
+
+    return { ok: true, data: page };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function saveLandingPageChangesAction(input: {
+  projectId: string;
+  title: string;
+  intent: string;
+  prompt: string;
+  designInspiration?: string;
+  html: string;
+  css: string;
+  slug: string;
+  notes?: string;
+}): Promise<ActionResult<{ saved: true }>> {
+  try {
+    const session = await requireSession();
+
+    if (!ObjectId.isValid(input.projectId)) {
+      throw new Error("Invalid landing page project.");
+    }
+
+    const content = landingPageContentSchema.parse({
+      title: input.title,
+      html: input.html,
+      css: scopeLandingCss(input.css),
+      slug: input.slug,
+      notes: input.notes ?? "",
+    });
+    const db = await getDb();
+    const result = await db.collection<LandingPageProjectDocument>("landingPageProjects").updateOne(
+      { _id: new ObjectId(input.projectId), userId: session.objectUserId },
+      {
+        $set: {
+          title: content.title,
+          html: content.html,
+          css: content.css,
+          slug: content.slug,
+          notes: content.notes,
+          prompt: input.prompt.trim(),
+          intent: input.intent.trim(),
+          designInspiration: input.designInspiration?.trim() ?? "",
+          status: "content",
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      throw new Error("Landing page project not found.");
+    }
+
+    revalidatePath("/dashboard");
+    revalidatePath("/create-landing-page");
+
+    return { ok: true, data: { saved: true } };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
+}
+
+export async function publishLandingPageDraftAction(input: {
+  projectId: string;
+  title: string;
+  html: string;
+  css: string;
+  slug: string;
+}): Promise<ActionResult<{ provider: "wordpress"; draftId: string; draftLink: string }>> {
+  try {
+    const session = await requireSession();
+
+    if (!ObjectId.isValid(input.projectId)) {
+      throw new Error("Invalid landing page project.");
+    }
+
+    const content = landingPageContentSchema.parse({
+      title: input.title,
+      html: input.html,
+      css: scopeLandingCss(input.css),
+      slug: input.slug,
+      notes: "",
+    });
+    const db = await getDb();
+    const project = await db.collection<LandingPageProjectDocument>("landingPageProjects").findOne({
+      _id: new ObjectId(input.projectId),
+      userId: session.objectUserId,
+    });
+
+    if (!project) {
+      throw new Error("Landing page project not found.");
+    }
+
+    const connection = await getWordPressConnectionForLandingPage(
+      session.objectUserId,
+      project.wordpressConnectionId,
+    );
+    const draft = project.wordpressPageId
+      ? await updateWordPressPageDraft(
+          connection,
+          project.wordpressPageId,
+          content.title,
+          landingPagePreviewHtml(content.html, content.css),
+          content.slug,
+        )
+      : await createWordPressPageDraft(
+          connection,
+          content.title,
+          landingPagePreviewHtml(content.html, content.css),
+          content.slug,
+        );
+
+    await db.collection<LandingPageProjectDocument>("landingPageProjects").updateOne(
+      { _id: project._id, userId: session.objectUserId },
+      {
+        $set: {
+          title: content.title,
+          html: content.html,
+          css: content.css,
+          slug: content.slug,
+          wordpressPageId: Number(draft.id),
+          wordpressLink: draft.link,
+          status: "drafted",
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    revalidatePath("/dashboard");
+    revalidatePath("/create-landing-page");
+
+    return {
+      ok: true,
+      data: {
+        provider: "wordpress",
+        draftId: String(draft.id),
+        draftLink: draft.link,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: flattenError(error) };
+  }
 }
 
 export async function generateOutlineAction(input: {

@@ -124,3 +124,12 @@ textarea {
 .tiptap ol {
   list-style: decimal;
 }
+
+.landing-refine-textarea {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.landing-refine-textarea::-webkit-scrollbar {
+  display: none;
+}

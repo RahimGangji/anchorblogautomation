@@ -29,6 +29,24 @@ function postsCreateUrl(baseUrl: string): string {
   return u.href;
 }
 
+function pagesCreateUrl(baseUrl: string): string {
+  const u = new URL(`${normalizeSiteUrl(baseUrl)}/wp-json/wp/v2/pages`);
+  u.searchParams.set(
+    "_anchor_req",
+    `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+  );
+  return u.href;
+}
+
+function pageUpdateUrl(baseUrl: string, pageId: number): string {
+  const u = new URL(`${normalizeSiteUrl(baseUrl)}/wp-json/wp/v2/pages/${pageId}`);
+  u.searchParams.set(
+    "_anchor_req",
+    `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+  );
+  return u.href;
+}
+
 function mediaCreateUrl(baseUrl: string): string {
   const u = new URL(`${normalizeSiteUrl(baseUrl)}/wp-json/wp/v2/media`);
   u.searchParams.set(
@@ -178,6 +196,87 @@ export async function createWordPressDraft(
       content: contentHtml,
       status: "draft",
       ...(featuredMediaId ? { featured_media: featuredMediaId } : {}),
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      typeof body?.message === "string"
+        ? body.message
+        : `WordPress returned status ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return {
+    id: Number(body.id),
+    link: typeof body.link === "string" ? body.link : "",
+  };
+}
+
+export async function createWordPressPageDraft(
+  connection: WordPressConnectionDocument,
+  title: string,
+  contentHtml: string,
+  slug: string,
+) {
+  const baseUrl = await resolveWordPressBaseUrl(normalizeSiteUrl(connection.siteUrl));
+  const response = await fetch(pagesCreateUrl(baseUrl), {
+    method: "POST",
+    headers: {
+      Authorization: authorizationHeaderForWordPress(connection),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+    body: JSON.stringify({
+      title,
+      slug,
+      content: contentHtml,
+      status: "draft",
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      typeof body?.message === "string"
+        ? body.message
+        : `WordPress returned status ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return {
+    id: Number(body.id),
+    link: typeof body.link === "string" ? body.link : "",
+  };
+}
+
+export async function updateWordPressPageDraft(
+  connection: WordPressConnectionDocument,
+  pageId: number,
+  title: string,
+  contentHtml: string,
+  slug: string,
+) {
+  const baseUrl = await resolveWordPressBaseUrl(normalizeSiteUrl(connection.siteUrl));
+  const response = await fetch(pageUpdateUrl(baseUrl, pageId), {
+    method: "POST",
+    headers: {
+      Authorization: authorizationHeaderForWordPress(connection),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+    body: JSON.stringify({
+      title,
+      slug,
+      content: contentHtml,
+      status: "draft",
     }),
   });
 

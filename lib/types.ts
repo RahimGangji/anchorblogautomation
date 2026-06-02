@@ -108,6 +108,34 @@ export type BlogProjectDocument = {
   updatedAt: Date;
 };
 
+export type LandingPageScreenshot = {
+  dataUrl: string;
+  fileName: string;
+  mimeType: string;
+};
+
+export type LandingPageProjectDocument = {
+  _id?: ObjectId;
+  userId: ObjectId;
+  wordpressConnectionId: ObjectId;
+  websiteContext?: string;
+  prompt: string;
+  intent: string;
+  designInspiration?: string;
+  screenshot?: LandingPageScreenshot | null;
+  title: string;
+  html: string;
+  css: string;
+  slug: string;
+  notes?: string;
+  screenshotUsed: boolean;
+  status: "content" | "drafted";
+  wordpressPageId?: number;
+  wordpressLink?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type ActionResult<T = unknown> =
   | { ok: true; data: T }
   | { ok: false; error: string };
