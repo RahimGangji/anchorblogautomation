@@ -5,6 +5,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "AnchorBlog Automation",
   description: "AI-assisted blog automation for WordPress drafts.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({
