@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { claudeTextModels, geminiTextModels, gptTextModels } from "@/lib/aiModels";
 
+export const maxLongPromptCharacters = 12000;
+export const maxDesignInspirationCharacters = 5000;
+
 export const signupSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters."),
   email: z.string().trim().email("Enter a valid email address."),
@@ -98,8 +101,20 @@ export const landingPageInputSchema = z.object({
   wordpressConnectionId: z.string().trim().min(1, "Choose the WordPress project for this landing page."),
   title: z.string().trim().min(3, "Landing page title is required.").max(120),
   intent: z.string().trim().min(5, "Intent must describe what this page should achieve.").max(500),
-  prompt: z.string().trim().min(10, "Prompt must describe the landing page you want.").max(2500),
-  designInspiration: z.string().trim().max(1500, "Design inspiration must be 1500 characters or fewer.").optional().default(""),
+  prompt: z
+    .string()
+    .trim()
+    .min(10, "Prompt must describe the landing page you want.")
+    .max(maxLongPromptCharacters, `Prompt must be ${maxLongPromptCharacters.toLocaleString()} characters or fewer.`),
+  designInspiration: z
+    .string()
+    .trim()
+    .max(
+      maxDesignInspirationCharacters,
+      `Design inspiration must be ${maxDesignInspirationCharacters.toLocaleString()} characters or fewer.`,
+    )
+    .optional()
+    .default(""),
   screenshot: screenshotSchema.optional().nullable(),
 });
 
@@ -134,7 +149,11 @@ export const createOutlineSchema = z.object({
   keyword: z.string().trim().min(2, "Keyword is required."),
   secondaryKeywords: z.string().trim().optional().default(""),
   seoEntities: z.string().trim().optional().default(""),
-  prompt: z.string().trim().min(10, "Prompt must describe the blog goal."),
+  prompt: z
+    .string()
+    .trim()
+    .min(10, "Prompt must describe the blog goal.")
+    .max(maxLongPromptCharacters, `Prompt must be ${maxLongPromptCharacters.toLocaleString()} characters or fewer.`),
 });
 
 const optionalFormString = z.preprocess((value) => (value == null ? "" : value), z.string().trim());

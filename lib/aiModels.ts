@@ -1,7 +1,7 @@
 export const gptTextModels = ["gpt-5.5", "gpt-5.4"] as const;
 
 export const claudeTextModels = [
-  "claude-opus-4-7",
+  "claude-opus-4-8",
   "claude-sonnet-4-6",
   "claude-haiku-4-5-20251001",
 ] as const;

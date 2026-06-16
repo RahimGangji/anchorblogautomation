@@ -45,7 +45,7 @@ export function AppShell({ user, children }: AppShellProps) {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <Link href="/dashboard" className="min-w-0 shrink-0" aria-label="AnchorBlog dashboard">
             <Image
-              src="https://cdn-ilekopg.nitrocdn.com/YMtCiafycjbgAwDhTkGWcdptBzZwQGxH/assets/images/optimized/rev-a07950c/www.anchortextor.io/wp-content/uploads/2025/03/logo.png"
+              src="https://www.anchortextor.io/wp-content/uploads/2025/03/logo.png"
               alt="AnchorBlog Automation"
               width={220}
               height={54}

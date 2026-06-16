@@ -77,7 +77,7 @@ export function LandingPageWorkflow({
   const [notes, setNotes] = useState(initialProject?.notes ?? "");
   const [screenshotUsed, setScreenshotUsed] = useState(initialProject?.screenshotUsed ?? false);
   const [refineInstruction, setRefineInstruction] = useState("");
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [pendingLabel, setPendingLabel] = useState("");
   const [isConnectionDropdownOpen, setIsConnectionDropdownOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const screenshotInputRef = useRef<HTMLInputElement>(null);
@@ -86,6 +86,7 @@ export function LandingPageWorkflow({
 
   const selectedConnection = connections.find((connection) => connection.id === wordpressConnectionId);
   const hasGeneratedPage = Boolean(projectId && html.trim() && css.trim());
+  const isBusy = isPending || Boolean(pendingLabel);
   const previewDocument = useMemo(
     () => `<!doctype html>
 <html>
@@ -113,29 +114,26 @@ export function LandingPageWorkflow({
     return () => document.removeEventListener("mousedown", closeConnectionDropdown);
   }, []);
 
-  useEffect(() => {
-    if (!hasGeneratedPage) {
-      setPreviewUrl("");
-      return;
-    }
-
-    const url = URL.createObjectURL(
-      new Blob([previewDocument], { type: "text/html;charset=utf-8" }),
-    );
-    setPreviewUrl(url);
-
-    return () => URL.revokeObjectURL(url);
-  }, [hasGeneratedPage, previewDocument]);
-
-  function runAction<T>(action: () => Promise<T>, onSuccess: (result: T) => void) {
+  function runAction<T>(action: () => Promise<T>, onSuccess: (result: T) => void, label = "Working...") {
     startTransition(async () => {
+      setPendingLabel(label);
       try {
         const result = await action();
         onSuccess(result);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Something went wrong.");
+      } finally {
+        setPendingLabel("");
       }
     });
+  }
+
+  function openPreviewInNewTab() {
+    const url = URL.createObjectURL(
+      new Blob([previewDocument], { type: "text/html;charset=utf-8" }),
+    );
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 
   function generateLandingPage() {
@@ -162,6 +160,7 @@ export function LandingPageWorkflow({
         setScreenshotUsed(page.screenshotUsed);
         toast.success("Landing page generated.");
       },
+      "Generating landing page with AI. This can take a minute for detailed prompts...",
     );
   }
 
@@ -197,6 +196,7 @@ export function LandingPageWorkflow({
         setRefineInstruction("");
         toast.success("Landing page refined.");
       },
+      "Refining landing page with AI...",
     );
   }
 
@@ -218,6 +218,7 @@ export function LandingPageWorkflow({
         return result.data;
       },
       () => toast.success("Landing page saved."),
+      "Saving landing page...",
     );
   }
 
@@ -241,6 +242,7 @@ export function LandingPageWorkflow({
             : `WordPress page draft created with ID ${draft.draftId}.`,
         );
       },
+      "Creating WordPress page draft...",
     );
   }
 
@@ -470,17 +472,17 @@ export function LandingPageWorkflow({
           <button
             type="button"
             onClick={generateLandingPage}
-            disabled={isPending || !wordpressConnectionId}
+            disabled={isBusy || !wordpressConnectionId}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
           >
-            {isPending && !hasGeneratedPage ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+            {isBusy && !hasGeneratedPage ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
             {hasGeneratedPage ? "Generate new version" : "Generate landing page"}
           </button>
           {hasGeneratedPage ? (
             <button
               type="button"
               onClick={saveChanges}
-              disabled={isPending}
+              disabled={isBusy}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:text-slate-400"
             >
               <Save size={18} />
@@ -488,6 +490,9 @@ export function LandingPageWorkflow({
             </button>
           ) : null}
         </div>
+        {pendingLabel ? (
+          <p className="mt-3 text-sm font-medium text-slate-600">{pendingLabel}</p>
+        ) : null}
       </section>
 
       {hasGeneratedPage ? (
@@ -510,19 +515,16 @@ export function LandingPageWorkflow({
                 Responsive
               </span>
             </div>
-            {previewUrl ? (
-              <div className="mb-3 flex justify-end">
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                >
-                  <ExternalLink size={16} />
-                  Open full page
-                </a>
-              </div>
-            ) : null}
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={openPreviewInNewTab}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                <ExternalLink size={16} />
+                Open full page
+              </button>
+            </div>
             <iframe
               title="Landing page preview"
               srcDoc={previewDocument}
@@ -585,7 +587,7 @@ export function LandingPageWorkflow({
                   <button
                     type="button"
                     onClick={refineLandingPage}
-                    disabled={isPending || !refineInstruction.trim()}
+                    disabled={isBusy || !refineInstruction.trim()}
                     className="absolute bottom-3 right-4 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-300"
                     aria-label="Refine page"
                     title="Refine page"
@@ -648,7 +650,7 @@ export function LandingPageWorkflow({
             <button
               type="button"
               onClick={publishDraft}
-              disabled={isPending}
+              disabled={isBusy}
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:bg-emerald-300"
             >
               <Send size={18} />

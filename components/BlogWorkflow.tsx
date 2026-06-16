@@ -282,6 +282,7 @@ export function BlogWorkflow({
     fileName: string;
     mimeType: string;
   } | null>(null);
+  const [pendingLabel, setPendingLabel] = useState("");
   const [isCmsDropdownOpen, setIsCmsDropdownOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const cmsDropdownRef = useRef<HTMLDivElement>(null);
@@ -346,6 +347,7 @@ export function BlogWorkflow({
       ? "WordPress"
       : "Shopify"
     : connectedProvider || "CMS";
+  const isBusy = isPending || Boolean(pendingLabel);
 
   function chooseCmsConnection(connection: CmsConnectionOption) {
     setCmsProvider(connection.provider);
@@ -381,13 +383,16 @@ export function BlogWorkflow({
     closeLinkEditModal();
   }
 
-  function runAction<T>(action: () => Promise<T>, onSuccess: (result: T) => void) {
+  function runAction<T>(action: () => Promise<T>, onSuccess: (result: T) => void, label = "Working...") {
     startTransition(async () => {
+      setPendingLabel(label);
       try {
         const result = await action();
         onSuccess(result);
       } catch (actionError) {
         toast.error(actionError instanceof Error ? actionError.message : "Something went wrong.");
+      } finally {
+        setPendingLabel("");
       }
     });
   }
@@ -413,6 +418,7 @@ export function BlogWorkflow({
         setStep("outline");
         toast.success("Outline created. You can edit it manually or ask AI to revise it.");
       },
+      "Creating blog outline with AI...",
     );
   }
 
@@ -433,6 +439,7 @@ export function BlogWorkflow({
         setOutlineInstruction("");
         toast.success("Outline revised.");
       },
+      "Revising blog outline with AI...",
     );
   }
 
@@ -453,6 +460,7 @@ export function BlogWorkflow({
         setStep("content");
         toast.success("Content generated and AI SEO report completed.");
       },
+      "Generating blog content and SEO report. Long prompts can take a minute...",
     );
   }
 
@@ -481,6 +489,7 @@ export function BlogWorkflow({
         setContentInstruction("");
         toast.success("Content revised and AI SEO report updated.");
       },
+      "Revising blog content and updating the SEO report...",
     );
   }
 
@@ -507,6 +516,7 @@ export function BlogWorkflow({
             : `Draft created in ${selectedCmsConnection?.label || connectedProvider || data.provider} with ID ${data.draftId}.`,
         );
       },
+      "Publishing draft to your CMS...",
     );
   }
 
@@ -528,6 +538,7 @@ export function BlogWorkflow({
       () => {
         toast.success("Changes saved.");
       },
+      "Saving blog changes...",
     );
   }
 
@@ -558,6 +569,7 @@ export function BlogWorkflow({
         setAiReport(report);
         toast.success("AI SEO report updated.");
       },
+      "Updating AI SEO report...",
     );
   }
 
@@ -635,6 +647,7 @@ export function BlogWorkflow({
         setIsImageCreatorOpen(false);
         toast.success("Image created and inserted into the content.");
       },
+      "Creating blog image...",
     );
   }
 
@@ -648,8 +661,14 @@ export function BlogWorkflow({
         </p>
       ) : null}
 
+      {pendingLabel ? (
+        <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 shadow-sm">
+          {pendingLabel}
+        </p>
+      ) : null}
+
       {step === "content" ? (
-        <AiSeoReportPanel report={aiReport} isPending={isPending} onRefresh={refreshAiReport} />
+        <AiSeoReportPanel report={aiReport} isPending={isBusy} onRefresh={refreshAiReport} />
       ) : null}
 
       <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
@@ -785,7 +804,7 @@ export function BlogWorkflow({
               />
             </label>
             </div>
-            {isPending ? (
+            {isBusy ? (
               <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-4">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-white">
                   <Sparkles size={17} />
@@ -838,7 +857,7 @@ export function BlogWorkflow({
                 <button
                   type="button"
                   onClick={generateContent}
-                  disabled={isPending || !canGenerateContent}
+                  disabled={isBusy || !canGenerateContent}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
                 >
                   <ArrowRight size={18} />
@@ -1038,25 +1057,25 @@ export function BlogWorkflow({
               <button
                 type="button"
                 onClick={saveContentChanges}
-                disabled={isPending || !projectId}
+                disabled={isBusy || !projectId}
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                {isBusy ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                 Save Changes
               </button>
               <button
                 type="button"
                 onClick={publishDraft}
-                disabled={isPending || !hasConnection}
+                disabled={isBusy || !hasConnection}
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
               >
-                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                {isBusy ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                 Draft to {selectedCmsProviderLabel}
               </button>
               <button
                 type="button"
                 onClick={() => setIsImageCreatorOpen(true)}
-                disabled={isPending || !canGenerateImage}
+                disabled={isBusy || !canGenerateImage}
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
               >
                 <ImagePlus size={18} />
@@ -1076,12 +1095,12 @@ export function BlogWorkflow({
                 <button
                   type="button"
                   onClick={refineContent}
-                  disabled={isPending || !contentInstruction.trim()}
+                  disabled={isBusy || !contentInstruction.trim()}
                   aria-label="Revise content"
                   title="Revise content"
                   className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"
                 >
-                  {isPending ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
+                  {isBusy ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
               </div>
             </label>
@@ -1103,12 +1122,12 @@ export function BlogWorkflow({
                 <button
                   type="button"
                   onClick={generateOutline}
-                  disabled={isPending || !cmsConnectionId || !cmsProvider}
+                  disabled={isBusy || !cmsConnectionId || !cmsProvider}
                   aria-label="Generate outline"
                   title="Generate outline"
                   className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"
                 >
-                  {isPending ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
+                  {isBusy ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
               </div>
             </label>
@@ -1129,12 +1148,12 @@ export function BlogWorkflow({
                 <button
                   type="button"
                   onClick={refineOutline}
-                  disabled={isPending || !outlineInstruction.trim()}
+                  disabled={isBusy || !outlineInstruction.trim()}
                   aria-label="Revise outline"
                   title="Revise outline"
                   className="mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-400"
                 >
-                  {isPending ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
+                  {isBusy ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
               </div>
             </label>
@@ -1214,11 +1233,11 @@ export function BlogWorkflow({
               <button
                 type="button"
                 onClick={createAndInsertImage}
-                disabled={isPending || !imagePrompt.trim() || outline.sections.length === 0}
+                disabled={isBusy || !imagePrompt.trim() || outline.sections.length === 0}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-400"
               >
-                {isPending ? <Loader2 className="animate-spin" size={18} /> : <ImagePlus size={18} />}
-                {isPending ? "Creating..." : "Create and insert image"}
+                {isBusy ? <Loader2 className="animate-spin" size={18} /> : <ImagePlus size={18} />}
+                {isBusy ? "Creating..." : "Create and insert image"}
               </button>
             </div>
           </aside>

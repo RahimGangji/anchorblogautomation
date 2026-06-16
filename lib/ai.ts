@@ -10,6 +10,13 @@ import type { BlogOutline } from "@/lib/types";
 import type { ActiveAiSettings } from "@/lib/aiSettings";
 
 const model = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
+const defaultMaxOutputTokens = 4096;
+const longFormMaxOutputTokens = 16000;
+const landingPageMaxOutputTokens = 20000;
+
+type CompleteOptions = {
+  maxOutputTokens?: number;
+};
 
 function getGroqClient() {
   if (!process.env.GROQ_API_KEY) {
@@ -31,9 +38,14 @@ function extractJson(text: string) {
   return JSON.parse(trimmed.slice(start, end + 1));
 }
 
-async function completeJson(system: string, user: string, settings?: ActiveAiSettings | null) {
+async function completeJson(
+  system: string,
+  user: string,
+  settings?: ActiveAiSettings | null,
+  options: CompleteOptions = {},
+) {
   if (settings) {
-    return extractJson(await completeWithUserProvider(system, user, settings));
+    return extractJson(await completeWithUserProvider(system, user, settings, options));
   }
 
   const completion = await getGroqClient().chat.completions.create({
@@ -60,20 +72,21 @@ async function completeJsonWithOptionalImage(
   user: string,
   image: LandingPageImageInput | null | undefined,
   settings?: ActiveAiSettings | null,
+  options: CompleteOptions = {},
 ) {
   if (!image || !settings || !providerSupportsImage(settings.provider)) {
     return {
-      json: await completeJson(system, user, settings),
+      json: await completeJson(system, user, settings, options),
       imageUsed: false,
     };
   }
 
   const text =
     settings.provider === "gpt"
-      ? await completeOpenAiWithImage(system, user, image, settings)
+      ? await completeOpenAiWithImage(system, user, image, settings, options)
       : settings.provider === "claude"
-        ? await completeClaudeWithImage(system, user, image, settings)
-        : await completeGeminiWithImage(system, user, image, settings);
+        ? await completeClaudeWithImage(system, user, image, settings, options)
+        : await completeGeminiWithImage(system, user, image, settings, options);
 
   return {
     json: extractJson(text),
@@ -85,16 +98,21 @@ function providerSupportsImage(provider: ActiveAiSettings["provider"]) {
   return provider === "gpt" || provider === "claude" || provider === "gemini";
 }
 
-async function completeWithUserProvider(system: string, user: string, settings: ActiveAiSettings) {
+async function completeWithUserProvider(
+  system: string,
+  user: string,
+  settings: ActiveAiSettings,
+  options: CompleteOptions,
+) {
   if (settings.provider === "gpt") {
-    return await completeOpenAi(system, user, settings);
+    return await completeOpenAi(system, user, settings, options);
   }
 
   if (settings.provider === "claude") {
-    return await completeClaude(system, user, settings);
+    return await completeClaude(system, user, settings, options);
   }
 
-  return await completeGemini(system, user, settings);
+  return await completeGemini(system, user, settings, options);
 }
 
 async function completeOpenAiWithImage(
@@ -102,6 +120,7 @@ async function completeOpenAiWithImage(
   user: string,
   image: LandingPageImageInput,
   settings: ActiveAiSettings,
+  options: CompleteOptions,
 ) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -122,6 +141,7 @@ async function completeOpenAiWithImage(
         },
       ],
       temperature: 0.6,
+      max_output_tokens: options.maxOutputTokens,
       text: { format: { type: "json_object" } },
     }),
   });
@@ -134,7 +154,12 @@ async function completeOpenAiWithImage(
   return readOpenAiText(body);
 }
 
-async function completeOpenAi(system: string, user: string, settings: ActiveAiSettings) {
+async function completeOpenAi(
+  system: string,
+  user: string,
+  settings: ActiveAiSettings,
+  options: CompleteOptions,
+) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -146,6 +171,7 @@ async function completeOpenAi(system: string, user: string, settings: ActiveAiSe
       instructions: system,
       input: user,
       temperature: 0.6,
+      max_output_tokens: options.maxOutputTokens,
       text: { format: { type: "json_object" } },
     }),
   });
@@ -163,6 +189,7 @@ async function completeClaudeWithImage(
   user: string,
   image: LandingPageImageInput,
   settings: ActiveAiSettings,
+  options: CompleteOptions,
 ) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -173,7 +200,7 @@ async function completeClaudeWithImage(
     },
     body: JSON.stringify({
       model: settings.model,
-      max_tokens: 4096,
+      max_tokens: options.maxOutputTokens ?? defaultMaxOutputTokens,
       temperature: 0.6,
       system: `${system}\nReturn only valid JSON. Do not include markdown fences.`,
       messages: [
@@ -208,6 +235,7 @@ async function completeGeminiWithImage(
   user: string,
   image: LandingPageImageInput,
   settings: ActiveAiSettings,
+  options: CompleteOptions,
 ) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${encodeURIComponent(settings.apiKey)}`,
@@ -234,6 +262,7 @@ async function completeGeminiWithImage(
         ],
         generationConfig: {
           temperature: 0.6,
+          maxOutputTokens: options.maxOutputTokens,
           responseMimeType: "application/json",
         },
       }),
@@ -248,7 +277,12 @@ async function completeGeminiWithImage(
   return readGeminiText(body);
 }
 
-async function completeClaude(system: string, user: string, settings: ActiveAiSettings) {
+async function completeClaude(
+  system: string,
+  user: string,
+  settings: ActiveAiSettings,
+  options: CompleteOptions,
+) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -258,7 +292,7 @@ async function completeClaude(system: string, user: string, settings: ActiveAiSe
     },
     body: JSON.stringify({
       model: settings.model,
-      max_tokens: 4096,
+      max_tokens: options.maxOutputTokens ?? defaultMaxOutputTokens,
       temperature: 0.6,
       system: `${system}\nReturn only valid JSON. Do not include markdown fences.`,
       messages: [{ role: "user", content: user }],
@@ -273,7 +307,12 @@ async function completeClaude(system: string, user: string, settings: ActiveAiSe
   return readClaudeText(body);
 }
 
-async function completeGemini(system: string, user: string, settings: ActiveAiSettings) {
+async function completeGemini(
+  system: string,
+  user: string,
+  settings: ActiveAiSettings,
+  options: CompleteOptions,
+) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${encodeURIComponent(settings.apiKey)}`,
     {
@@ -286,6 +325,7 @@ async function completeGemini(system: string, user: string, settings: ActiveAiSe
         contents: [{ role: "user", parts: [{ text: user }] }],
         generationConfig: {
           temperature: 0.6,
+          maxOutputTokens: options.maxOutputTokens,
           responseMimeType: "application/json",
         },
       }),
@@ -349,6 +389,13 @@ function readOpenAiText(body: unknown) {
 
 function readClaudeText(body: unknown) {
   if (body && typeof body === "object" && !Array.isArray(body)) {
+    const stopReason = (body as { stop_reason?: unknown }).stop_reason;
+    if (stopReason === "max_tokens") {
+      throw new Error(
+        "Claude hit the output token limit before finishing. Try generating again or shorten the requested page/article detail.",
+      );
+    }
+
     const content = (body as { content?: unknown }).content;
     if (Array.isArray(content)) {
       const text = content
@@ -562,6 +609,7 @@ Content quality requirements:
 
 Do not add internal links, external links, citations, source names, or linked anchor tags. Generate a WordPress-ready slug, SEO meta title, and meta description within the character limits.`,
     settings,
+    { maxOutputTokens: longFormMaxOutputTokens },
   );
 
   return contentSchema.parse(normalizeContentJson(json));
@@ -621,6 +669,7 @@ Revision quality requirements:
 
 Do not add internal links, external links, citations, source names, or linked anchor tags. If existing content contains links, keep the visible anchor text but remove the link markup.`,
     params.settings,
+    { maxOutputTokens: longFormMaxOutputTokens },
   );
 
   return contentSchema.parse(normalizeContentJson(json));
@@ -695,6 +744,7 @@ Output requirements:
 - Avoid fake statistics, unsupported claims, external scripts, external stylesheets, tracking pixels, and live forms.`,
     brief.screenshot,
     settings,
+    { maxOutputTokens: landingPageMaxOutputTokens },
   );
 
   return {
@@ -731,6 +781,7 @@ ${params.instruction}
 Revise the page so the rendered preview is more effective for the stated intent. Keep CSS scoped, responsive, and WordPress-friendly. If the instruction asks for visual changes, update both html and css as needed. Keep the JSON compact enough to parse reliably.`,
     params.screenshot,
     params.settings,
+    { maxOutputTokens: landingPageMaxOutputTokens },
   );
 
   return {
